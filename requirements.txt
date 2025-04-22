@@ -1,6 +1,5 @@
 # requirements.txt
-google-cloud-bigquery==3.10.0
+numpy==1.24.0
 pandas==1.5.3
 streamlit==1.22.0
-google-auth==2.16.0
-protobuf==3.20.3  # Evita conflictos con dependencias de Google
+google-cloud-bigquery==3.10.0
