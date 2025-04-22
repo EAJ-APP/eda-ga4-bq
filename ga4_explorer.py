@@ -4,6 +4,17 @@ from google.oauth2 import service_account
 import pandas as pd
 import os
 
+# --- Verificación de dependencias ---
+def check_dependencies():
+    """Verifica que los paquetes necesarios estén instalados"""
+    try:
+        import db_dtypes  # noqa
+    except ImportError:
+        st.error("""Falta el paquete db-dtypes. Por favor actualiza tus dependencias:
+                 \n1. Agrega 'db-dtypes==1.2.0' a requirements.txt
+                 \n2. Reinicia la app en Streamlit Cloud""")
+        st.stop()
+
 # --- Configuración BigQuery ---
 def get_bq_client(credentials_path=None):
     """Obtiene el cliente de BigQuery"""
@@ -23,11 +34,20 @@ def get_bq_client(credentials_path=None):
 
 def run_query(client, query):
     """Ejecuta una consulta y devuelve un DataFrame."""
-    query_job = client.query(query)
-    return query_job.to_dataframe()
+    try:
+        query_job = client.query(query)
+        return query_job.to_dataframe(
+            create_bqstorage_client=False,
+            dtypes={"event_count": "int64"}  # Tipado explícito para columnas conocidas
+        )
+    except Exception as e:
+        st.error(f"Error en la consulta: {str(e)}")
+        st.stop()
 
 # --- Interfaz Streamlit ---
 def main():
+    check_dependencies()  # Verificar paquetes primero
+    
     st.set_page_config(page_title="GA4 Explorer", layout="wide")
     st.title("📊 Análisis Exploratorio GA4")
 
@@ -56,13 +76,13 @@ def main():
     else:
         client = get_bq_client()
 
-    # Obtener proyectos y datasets solo si hay conexión
+    # Obtener proyectos y datasets
     try:
         projects = [p.project_id for p in client.list_projects()]
-        selected_project = st.sidebar.selectbox("Proyecto BigQuery", projects)
+        selected_project = st.sidebar.selectbox("Proyecto BigQuery", projects, key="project_select")
         
         datasets = [d.dataset_id for d in client.list_datasets(selected_project)]
-        selected_dataset = st.sidebar.selectbox("Dataset GA4", datasets)
+        selected_dataset = st.sidebar.selectbox("Dataset GA4", datasets, key="dataset_select")
         
         st.session_state.client = client
         st.session_state.project = selected_project
@@ -77,9 +97,9 @@ def main():
     # Selector de fechas
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Fecha inicio", value=pd.to_datetime("2023-01-01"))
+        start_date = st.date_input("Fecha inicio", value=pd.to_datetime("2023-01-01"), key="start_date")
     with col2:
-        end_date = st.date_input("Fecha fin", value=pd.to_datetime("today"))
+        end_date = st.date_input("Fecha fin", value=pd.to_datetime("today"), key="end_date")
     
     if st.button("Obtener eventos principales"):
         query = f"""
@@ -94,8 +114,15 @@ def main():
             LIMIT 20
         """
         df = run_query(st.session_state.client, query)
+        
+        # Mostrar resultados
         st.dataframe(df)
         st.bar_chart(df.set_index("event_name"))
+        
+        # Opcional: Mostrar metadatos
+        with st.expander("📊 Metadatos de los resultados"):
+            st.write("Tipos de datos:", df.dtypes)
+            st.write("Total de filas:", len(df))
 
 if __name__ == "__main__":
     main()
