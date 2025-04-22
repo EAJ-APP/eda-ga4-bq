@@ -7,13 +7,9 @@ import os
 # --- Configuración BigQuery ---
 
 def get_bq_client():
-    """Lee credenciales desde secrets.toml"""
-    if st.secrets.get("gcp_service_account"):
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        credentials = service_account.Credentials.from_service_account_info(creds_dict)
-        return bigquery.Client(credentials=credentials)
-    else:
-        raise ValueError("No se encontraron credenciales en secrets.toml")
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    credentials = service_account.Credentials.from_service_account_info(creds_dict)
+    return bigquery.Client(credentials=credentials)
 
 def run_query(client, query):
     """Ejecuta una consulta y devuelve un DataFrame."""
