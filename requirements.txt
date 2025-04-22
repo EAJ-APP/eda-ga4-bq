@@ -1,6 +1,6 @@
 # requirements.txt
-numpy==1.24.0
-pandas==1.5.3
-streamlit==1.22.0
-google-cloud-bigquery==3.10.0
-protobuf==3.20.3
+numpy==1.26.4
+pandas==2.2.1
+streamlit==1.32.2
+google-cloud-bigquery==3.20.1
+protobuf==4.25.3
