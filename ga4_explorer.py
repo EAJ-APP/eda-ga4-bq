@@ -7,9 +7,14 @@ import os
 # --- Configuración BigQuery ---
 
 def get_bq_client():
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    credentials = service_account.Credentials.from_service_account_info(creds_dict)
-    return bigquery.Client(credentials=credentials)
+    """Obtiene el cliente de BigQuery desde secrets.toml"""
+    try:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        credentials = service_account.Credentials.from_service_account_info(creds_dict)
+        return bigquery.Client(credentials=credentials)
+    except Exception as e:
+        st.error(f"Error al conectar con BigQuery: {str(e)}")
+        st.stop()  # Detiene la ejecución si hay error
 
 def run_query(client, query):
     """Ejecuta una consulta y devuelve un DataFrame."""
@@ -19,6 +24,14 @@ def run_query(client, query):
 # --- Interfaz Streamlit ---
 def main():
     st.set_page_config(page_title="GA4 Explorer", layout="wide")
+    
+    # Verifica si los secrets están configurados
+    if "gcp_service_account" not in st.secrets:
+        st.error("⚠️ Credenciales no configuradas. Por favor configura los secrets en Streamlit Cloud.")
+        st.stop()
+    
+    client = get_bq_client()  # Ahora sin parámetros
+
     st.title("📊 Análisis Exploratorio GA4")
 
     # --- Sidebar: Configuración ---
