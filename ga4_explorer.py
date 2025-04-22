@@ -5,14 +5,15 @@ import pandas as pd
 import os
 
 # --- Configuración BigQuery ---
-def get_bq_client(credentials_path):
-    """Crea el cliente de BigQuery usando credenciales."""
-    credentials = service_account.Credentials.from_service_account_file(
-        credentials_path,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
-    client = bigquery.Client(credentials=credentials, project=credentials.project_id)
-    return client
+
+def get_bq_client():
+    """Lee credenciales desde secrets.toml"""
+    if st.secrets.get("gcp_service_account"):
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        credentials = service_account.Credentials.from_service_account_info(creds_dict)
+        return bigquery.Client(credentials=credentials)
+    else:
+        raise ValueError("No se encontraron credenciales en secrets.toml")
 
 def run_query(client, query):
     """Ejecuta una consulta y devuelve un DataFrame."""
