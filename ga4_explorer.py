@@ -1,11 +1,12 @@
 import streamlit as st
-from google.cloud import bigquery
-from google.oauth2 import service_account
-
+# Reemplaza TODAS las importaciones de Google Cloud al inicio del archivo por:
 try:
-    from google.api_core.exceptions import ServiceError
-except ImportError:
-    from google.cloud.exceptions import ServiceError  # Fallback alternativo
+    from google.cloud import bigquery
+    from google.oauth2 import service_account
+    # Elimina todas las importaciones específicas de excepciones
+except ImportError as e:
+    st.error(f"Error crítico: {str(e)}. Verifica requirements.txt")
+    st.stop()
     
 import pandas as pd
 import time
