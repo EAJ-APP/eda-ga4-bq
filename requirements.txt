@@ -1,5 +1,3 @@
-# Versión actualizada de requirements.txt
-google-api-core==2.17.1  # <-- Añade esta línea
 google-cloud-bigquery==3.20.1
 db-dtypes==1.2.0
 protobuf==4.25.3
