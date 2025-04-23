@@ -1,7 +1,12 @@
 import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from google.api_core.exceptions import ServiceError
+
+try:
+    from google.api_core.exceptions import ServiceError
+except ImportError:
+    from google.cloud.exceptions import ServiceError  # Fallback alternativo
+    
 import pandas as pd
 import time
 from concurrent.futures import TimeoutError
