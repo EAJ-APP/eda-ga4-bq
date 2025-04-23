@@ -1,107 +1,125 @@
 import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
+from google.api_core.exceptions import ServiceError
 import pandas as pd
-import os
+import time
+from concurrent.futures import TimeoutError
 
-# --- Verificación de dependencias ---
+# ===== 1. VERIFICACIÓN DE DEPENDENCIAS =====
 def check_dependencies():
-    """Verifica que los paquetes necesarios estén instalados"""
+    """Verifica que los paquetes esenciales estén instalados"""
     try:
-        import db_dtypes  # noqa
-    except ImportError:
-        st.error("""Falta el paquete db-dtypes. Por favor actualiza tus dependencias:
-                 \n1. Agrega 'db-dtypes==1.2.0' a requirements.txt
-                 \n2. Reinicia la app en Streamlit Cloud""")
+        import db_dtypes  # Necesario para BigQuery -> pandas
+        import pandas as pd
+        from google.cloud import bigquery
+    except ImportError as e:
+        st.error(f"❌ Error crítico: Falta paquete ({str(e)}). Actualiza requirements.txt y reinicia la app.")
         st.stop()
 
-# --- Configuración BigQuery ---
+# ===== 2. VALIDACIÓN DE ESQUEMA =====
+def validate_schema(df):
+    """Valida que el DataFrame tenga las columnas esperadas"""
+    required_columns = {
+        'event_name': 'object',  # pandas dtype equivalente a string
+        'event_count': 'int64'
+    }
+    
+    for col, dtype in required_columns.items():
+        if col not in df.columns:
+            raise ValueError(f"Columna faltante: {col}")
+        if str(df[col].dtype) != dtype:
+            raise ValueError(f"Tipo incorrecto en {col}. Esperado: {dtype}, Obtenido: {df[col].dtype}")
+
+# ===== 3. CONEXIÓN A BIGQUERY =====
 def get_bq_client(credentials_path=None):
-    """Obtiene el cliente de BigQuery"""
+    """Crea cliente de BigQuery (local o en la nube)"""
     try:
-        if credentials_path:
-            # Para desarrollo local con archivo JSON
+        if credentials_path:  # Modo desarrollo (archivo JSON)
             credentials = service_account.Credentials.from_service_account_file(credentials_path)
-        else:
-            # Para producción en Streamlit Cloud
+        else:  # Modo producción (Streamlit Cloud Secrets)
             creds_dict = dict(st.secrets["gcp_service_account"])
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
-        
         return bigquery.Client(credentials=credentials)
     except Exception as e:
-        st.error(f"Error al conectar con BigQuery: {str(e)}")
+        st.error(f"🔌 Error de conexión: {str(e)}")
         st.stop()
 
-def run_query(client, query):
-    """Ejecuta una consulta y devuelve un DataFrame."""
-    try:
-        query_job = client.query(query)
-        return query_job.to_dataframe(
-            create_bqstorage_client=False,
-            dtypes={"event_count": "int64"}  # Tipado explícito para columnas conocidas
-        )
-    except Exception as e:
-        st.error(f"Error en la consulta: {str(e)}")
-        st.stop()
+# ===== 4. EJECUCIÓN ROBUSTA DE CONSULTAS =====
+def run_query(client, query, timeout=30, max_retries=3):
+    """Ejecuta SQL con timeout y reintentos para errores temporales"""
+    for attempt in range(max_retries):
+        try:
+            query_job = client.query(query)
+            df = query_job.result(timeout=timeout).to_dataframe(
+                create_bqstorage_client=False  # Evita dependencia adicional
+            )
+            validate_schema(df)
+            return df
+        except TimeoutError:
+            st.warning(f"⏳ Timeout (intento {attempt + 1}/{max_retries})")
+            if attempt == max_retries - 1:
+                st.error("⌛ Consulta demasiado larga. Filtra más datos o simplifica la query.")
+                st.stop()
+            time.sleep(2)  # Espera breve antes de reintentar
+        except ServiceError as e:  # Errores temporales de Google Cloud
+            st.warning(f"⚠️ Reintentando... (error temporal: {str(e)})")
+            time.sleep(2 ** attempt)  # Espera exponencial
+        except Exception as e:
+            st.error(f"❌ Error irrecuperable:\n{str(e)}\n\nConsulta:\n```sql\n{query}\n```")
+            st.stop()
 
-# --- Interfaz Streamlit ---
+# ===== 5. INTERFAZ PRINCIPAL =====
 def main():
-    check_dependencies()  # Verificar paquetes primero
-    
+    # Configuración inicial
+    check_dependencies()  # <-- Verifica dependencias primero
     st.set_page_config(page_title="GA4 Explorer", layout="wide")
     st.title("📊 Análisis Exploratorio GA4")
 
     # --- Sidebar: Configuración ---
     with st.sidebar:
-        st.header("🔑 Configuración")
-        
-        # Modo desarrollo/producción
-        development_mode = st.toggle("Modo desarrollo (usar archivo JSON)")
+        st.header("🔧 Configuración")
+        development_mode = st.toggle("Modo desarrollo (usar JSON local)")
         
         if development_mode:
-            creds_file = st.file_uploader("Sube tus credenciales JSON", type=["json"])
+            creds_file = st.file_uploader("Sube credenciales JSON", type=["json"])
             if creds_file:
                 with open("temp_creds.json", "wb") as f:
                     f.write(creds_file.getvalue())
                 st.session_state.creds = "temp_creds.json"
-                st.success("Credenciales cargadas!")
-        else:
-            if "gcp_service_account" not in st.secrets:
-                st.error("Configure los secrets en Streamlit Cloud")
-                st.stop()
+        elif "gcp_service_account" not in st.secrets:
+            st.error("⚠️ Configura los Secrets en Streamlit Cloud")
+            st.stop()
 
     # --- Conexión a BigQuery ---
-    if development_mode and "creds" in st.session_state:
-        client = get_bq_client(st.session_state.creds)
-    else:
-        client = get_bq_client()
+    client = get_bq_client(
+        st.session_state.creds if development_mode and "creds" in st.session_state else None
+    )
 
-    # Obtener proyectos y datasets
+    # --- Selectores de proyecto/dataset ---
     try:
         projects = [p.project_id for p in client.list_projects()]
-        selected_project = st.sidebar.selectbox("Proyecto BigQuery", projects, key="project_select")
-        
+        selected_project = st.sidebar.selectbox("Proyecto", projects, key="project_select")
         datasets = [d.dataset_id for d in client.list_datasets(selected_project)]
         selected_dataset = st.sidebar.selectbox("Dataset GA4", datasets, key="dataset_select")
         
+        # Guarda en sesión
         st.session_state.client = client
         st.session_state.project = selected_project
         st.session_state.dataset = selected_dataset
     except Exception as e:
-        st.error(f"No se pudo obtener la lista de proyectos/datasets: {str(e)}")
+        st.error(f"🗄️ Error al listar recursos:\n{str(e)}")
         st.stop()
 
-    # --- Panel principal ---
-    st.header("🔍 Consulta Básica")
-    
-    # Selector de fechas
+    # --- Consulta principal ---
+    st.header("🔍 Consulta básica")
     col1, col2 = st.columns(2)
     with col1:
         start_date = st.date_input("Fecha inicio", value=pd.to_datetime("2023-01-01"), key="start_date")
     with col2:
         end_date = st.date_input("Fecha fin", value=pd.to_datetime("today"), key="end_date")
     
-    if st.button("Obtener eventos principales"):
+    if st.button("Ejecutar consulta"):
         query = f"""
             SELECT 
                 event_name,
@@ -120,9 +138,9 @@ def main():
         st.bar_chart(df.set_index("event_name"))
         
         # Opcional: Mostrar metadatos
-        with st.expander("📊 Metadatos de los resultados"):
-            st.write("Tipos de datos:", df.dtypes)
-            st.write("Total de filas:", len(df))
+        with st.expander("🔍 Metadatos"):
+            st.write(f"📏 Filas: {len(df)}")
+            st.write("📊 Tipos de datos:", df.dtypes)
 
 if __name__ == "__main__":
     main()
