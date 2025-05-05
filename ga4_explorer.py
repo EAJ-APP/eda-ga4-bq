@@ -53,8 +53,8 @@ def run_query(client, query, timeout=30):
         handle_bq_error(e, query)
 
 # ===== 5. CONSULTAS ESPECÍFICAS =====
-def generar_query_cookies(project, dataset, start_date, end_date):
-    """Consulta de consentimiento de cookies"""
+def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
+    """Consulta básica de consentimiento"""
     return f"""
     SELECT
       privacy_info.analytics_storage AS analytics_storage_status,
@@ -69,61 +69,94 @@ def generar_query_cookies(project, dataset, start_date, end_date):
     ORDER BY 3 DESC
     """
 
-def mostrar_resultados_cookies(df):
-    """Visualización para datos de cookies"""
-    # Preprocesamiento
-    df['analytics_status'] = df['analytics_storage_status'].map(
-        {True: 'Aceptado', False: 'Rechazado', None: 'No especificado'})
-    df['ads_status'] = df['ads_storage_status'].map(
-        {True: 'Aceptado', False: 'Rechazado', None: 'No especificado'})
-    
-    # Tabla
+def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
+    """Consulta de estimación de usuarios con/sin consentimiento"""
+    return f"""
+    WITH ConsentFactors AS (
+        SELECT 2.0 AS factor_value, 'Granted' AS consent_state
+        UNION ALL
+        SELECT 3.0 AS factor_value, 'Denied' AS consent_state
+    ),
+    EventData AS (
+        SELECT
+            IF(privacy_info.analytics_storage IS TRUE, 'Granted', 'Denied') AS consent_state,
+            COUNT(1) AS total_events,
+            COUNT(DISTINCT user_pseudo_id) AS distinct_users
+        FROM `{project}.{dataset}.events_*`
+        WHERE event_name = 'page_view'
+          AND _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' AND '{end_date.strftime('%Y%m%d')}'
+        GROUP BY consent_state
+    ),
+    ConsentAnalysis AS (
+        SELECT
+            ed.consent_state,
+            ed.total_events,
+            ed.distinct_users,
+            CAST(ROUND(ed.total_events / cf.factor_value) AS INT64) AS estimated_users
+        FROM EventData ed
+        LEFT JOIN ConsentFactors cf ON ed.consent_state = cf.consent_state
+    )
+    SELECT
+        consent_state,
+        total_events,
+        distinct_users,
+        estimated_users,
+        ROUND(SAFE_DIVIDE(total_events, SUM(total_events) OVER()), 4) AS event_share
+    FROM ConsentAnalysis
+    ORDER BY total_events DESC
+    """
+
+# ===== 6. VISUALIZACIONES =====
+def mostrar_consentimiento_basico(df):
+    """Visualización para consulta básica de consentimiento"""
     st.subheader("📋 Datos Crudos")
     st.dataframe(df)
     
-    # Gráficos
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("🍪 Consentimiento Analytics")
-        fig1 = px.pie(df, names='analytics_status', values='total_users')
+        fig1 = px.pie(df, names='analytics_storage_status', 
+                     values='total_events', title='Eventos por Consentimiento Analytics')
         st.plotly_chart(fig1, use_container_width=True)
     
     with col2:
-        st.subheader("📢 Consentimiento Ads")
-        fig2 = px.pie(df, names='ads_status', values='total_sessions')
+        fig2 = px.bar(df, x='ads_storage_status', y='total_users',
+                     title='Usuarios Únicos por Consentimiento Ads')
         st.plotly_chart(fig2, use_container_width=True)
-    
-    # Gráfico combinado
-    st.subheader("📈 Comparativa Completa")
-    fig3 = px.bar(df, 
-                 x='analytics_status', 
-                 y='total_events', 
-                 color='ads_status',
-                 barmode='group',
-                 labels={'total_events': 'Eventos totales'})
-    st.plotly_chart(fig3, use_container_width=True)
 
-# ===== 6. INTERFAZ PRINCIPAL =====
-def show_tab_interface(client, project, dataset, tab_id, start_date, end_date):
-    """Interfaz específica para cada tab"""
-    if tab_id == "cookies":
-        query = generar_query_cookies(project, dataset, start_date, end_date)
-        df = run_query(client, query)
-        mostrar_resultados_cookies(df)
-    else:
-        # Consulta genérica para otras pestañas
-        query = f"""
-            SELECT event_name, COUNT(*) as event_count
-            FROM `{project}.{dataset}.events_*`
-            WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' 
-                AND '{end_date.strftime('%Y%m%d')}'
-            GROUP BY 1
-            ORDER BY 2 DESC
-            LIMIT 20
-        """
-        df = run_query(client, query)
-        st.dataframe(df)
-        st.bar_chart(df.set_index("event_name"))
+def mostrar_estimacion_usuarios(df):
+    """Visualización para estimación de usuarios"""
+    st.subheader("📊 Estimación de Usuarios Reales")
+    
+    # Preprocesamiento
+    df['consent_state'] = df['consent_state'].map({
+        'Granted': 'Consentimiento Otorgado',
+        'Denied': 'Consentimiento Denegado'
+    })
+    
+    fig = px.bar(df, x='consent_state', y=['distinct_users', 'estimated_users'],
+                barmode='group', title='Comparativa: Usuarios Detectados vs Estimados',
+                labels={'value': 'Número de Usuarios', 'variable': 'Tipo'})
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.metric("📈 Porcentaje de Eventos sin Consentimiento", 
+             f"{df[df['consent_state'] == 'Consentimiento Denegado']['event_share'].values[0]*100:.2f}%")
+
+# ===== 7. INTERFAZ PRINCIPAL =====
+def show_cookies_tab(client, project, dataset, start_date, end_date):
+    """Pestaña de Cookies con múltiples consultas en acordeones"""
+    with st.expander("🛡️ Consentimiento Básico", expanded=True):
+        if st.button("Ejecutar Análisis Básico", key="btn_consent_basic"):
+            with st.spinner("Calculando consentimientos..."):
+                query = generar_query_consentimiento_basico(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_consentimiento_basico(df)
+    
+    with st.expander("📈 Estimación de Usuarios Reales"):
+        if st.button("Ejecutar Estimación", key="btn_estimation"):
+            with st.spinner("Estimando usuarios reales..."):
+                query = generar_query_estimacion_usuarios(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_estimacion_usuarios(df)
 
 def main():
     check_dependencies()
@@ -163,7 +196,7 @@ def main():
     except Exception as e:
         handle_bq_error(e)
 
-    # --- Tabs ---
+    # --- Tabs Principales ---
     tab_titles = [
         "🍪 Cookies y Privacidad",
         "🛒 Ecommerce", 
@@ -179,7 +212,11 @@ def main():
     for tab, tab_id in zip(tabs, tab_ids):
         with tab:
             st.header(f"Análisis de {tab_id.capitalize()}")
-            show_tab_interface(client, selected_project, selected_dataset, tab_id, start_date, end_date)
+            if tab_id == "cookies":
+                show_cookies_tab(client, selected_project, selected_dataset, start_date, end_date)
+            else:
+                # Placeholder para otras pestañas
+                st.info(f"🔧 Sección en desarrollo. Próximamente: consultas para {tab_id}")
 
 if __name__ == "__main__":
     main()
