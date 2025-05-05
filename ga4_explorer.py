@@ -69,21 +69,20 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     ORDER BY 3 DESC
     """
 
-# [Todo el código anterior permanece igual hasta la función generar_query_estimacion_usuarios]
-
 def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
-    """Consulta de estimación de usuarios con/sin consentimiento (versión corregida)"""
+    """Versión corregida que maneja correctamente los tipos de datos"""
     return f"""
     WITH ConsentFactors AS (
-        SELECT 2.0 AS factor_value, 'Granted' AS consent_state
+        SELECT 2.0 AS factor_value, 'true' AS consent_state  -- Ahora usa strings
         UNION ALL
-        SELECT 3.0 AS factor_value, 'Denied' AS consent_state
+        SELECT 3.0 AS factor_value, 'false' AS consent_state
     ),
     EventData AS (
         SELECT
+            -- Convertimos el booleano a string 'true'/'false' para comparar
             CASE 
-                WHEN privacy_info.analytics_storage = TRUE THEN 'Granted'
-                ELSE 'Denied'
+                WHEN privacy_info.analytics_storage IS NULL THEN 'false'
+                ELSE LOWER(CAST(privacy_info.analytics_storage AS STRING))
             END AS consent_state,
             COUNT(1) AS total_events,
             COUNT(DISTINCT user_pseudo_id) AS distinct_users
@@ -94,12 +93,20 @@ def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
     ),
     ConsentAnalysis AS (
         SELECT
-            ed.consent_state,
+            -- Mapeamos a valores legibles
+            CASE 
+                WHEN ed.consent_state = 'true' THEN 'Granted'
+                ELSE 'Denied'
+            END AS consent_state,
             ed.total_events,
             ed.distinct_users,
             CAST(ROUND(ed.total_events / cf.factor_value) AS INT64) AS estimated_users
         FROM EventData ed
-        LEFT JOIN ConsentFactors cf ON ed.consent_state = cf.consent_state
+        LEFT JOIN ConsentFactors cf ON 
+            CASE 
+                WHEN ed.consent_state = 'true' THEN 'true'
+                ELSE 'false'
+            END = cf.consent_state
     )
     SELECT
         consent_state,
