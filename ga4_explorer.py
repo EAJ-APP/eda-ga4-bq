@@ -69,8 +69,10 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     ORDER BY 3 DESC
     """
 
+# [Todo el código anterior permanece igual hasta la función generar_query_estimacion_usuarios]
+
 def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
-    """Consulta de estimación de usuarios con/sin consentimiento"""
+    """Consulta de estimación de usuarios con/sin consentimiento (versión corregida)"""
     return f"""
     WITH ConsentFactors AS (
         SELECT 2.0 AS factor_value, 'Granted' AS consent_state
@@ -79,7 +81,10 @@ def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
     ),
     EventData AS (
         SELECT
-            IF(privacy_info.analytics_storage IS TRUE, 'Granted', 'Denied') AS consent_state,
+            CASE 
+                WHEN privacy_info.analytics_storage = TRUE THEN 'Granted'
+                ELSE 'Denied'
+            END AS consent_state,
             COUNT(1) AS total_events,
             COUNT(DISTINCT user_pseudo_id) AS distinct_users
         FROM `{project}.{dataset}.events_*`
