@@ -69,17 +69,33 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     ORDER BY 3 DESC
     """
 
+def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date):
+    """Consulta de consentimiento desglosada por dispositivo"""
+    return f"""
+    SELECT
+      device.category AS device_type,
+      privacy_info.analytics_storage AS analytics_storage_status,
+      privacy_info.ads_storage AS ads_storage_status,
+      COUNT(*) AS total_events,
+      COUNT(DISTINCT user_pseudo_id) AS total_users,
+      COUNT(DISTINCT CONCAT(user_pseudo_id, '-', 
+        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id'))) AS total_sessions
+    FROM `{project}.{dataset}.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' AND '{end_date.strftime('%Y%m%d')}'
+    GROUP BY 1, 2, 3
+    ORDER BY device_type, total_events DESC
+    """
+
 def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
     """Versión corregida que maneja correctamente los tipos de datos"""
     return f"""
     WITH ConsentFactors AS (
-        SELECT 2.0 AS factor_value, 'true' AS consent_state  -- Ahora usa strings
+        SELECT 2.0 AS factor_value, 'true' AS consent_state
         UNION ALL
         SELECT 3.0 AS factor_value, 'false' AS consent_state
     ),
     EventData AS (
         SELECT
-            -- Convertimos el booleano a string 'true'/'false' para comparar
             CASE 
                 WHEN privacy_info.analytics_storage IS NULL THEN 'false'
                 ELSE LOWER(CAST(privacy_info.analytics_storage AS STRING))
@@ -93,7 +109,6 @@ def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
     ),
     ConsentAnalysis AS (
         SELECT
-            -- Mapeamos a valores legibles
             CASE 
                 WHEN ed.consent_state = 'true' THEN 'Granted'
                 ELSE 'Denied'
@@ -135,11 +150,40 @@ def mostrar_consentimiento_basico(df):
                      title='Usuarios Únicos por Consentimiento Ads')
         st.plotly_chart(fig2, use_container_width=True)
 
+def mostrar_consentimiento_por_dispositivo(df):
+    """Visualización para consentimiento por dispositivo"""
+    st.subheader("📱 Consentimiento por Dispositivo")
+    
+    # Preprocesamiento para nombres legibles
+    df['device_type'] = df['device_type'].str.capitalize()
+    df['analytics_storage_status'] = df['analytics_storage_status'].map({
+        True: 'Consentido', 
+        False: 'No Consentido',
+        None: 'No Definido'
+    })
+    
+    # Gráfico de barras apiladas
+    fig = px.bar(df, 
+                 x='device_type', 
+                 y='total_events', 
+                 color='analytics_storage_status',
+                 barmode='stack',
+                 title='Eventos por Tipo de Dispositivo y Consentimiento',
+                 labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'})
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Tabla resumen
+    st.dataframe(df.pivot_table(
+        index='device_type',
+        columns='analytics_storage_status',
+        values='total_users',
+        aggfunc='sum',
+        fill_value=0
+    ).style.background_gradient(cmap='Blues'))
+
 def mostrar_estimacion_usuarios(df):
     """Visualización para estimación de usuarios"""
     st.subheader("📊 Estimación de Usuarios Reales")
-    
-    # Preprocesamiento
     df['consent_state'] = df['consent_state'].map({
         'Granted': 'Consentimiento Otorgado',
         'Denied': 'Consentimiento Denegado'
@@ -162,6 +206,13 @@ def show_cookies_tab(client, project, dataset, start_date, end_date):
                 query = generar_query_consentimiento_basico(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_consentimiento_basico(df)
+    
+    with st.expander("📱 Consentimiento por Dispositivo"):
+        if st.button("Ejecutar Análisis por Dispositivo", key="btn_consent_device"):
+            with st.spinner("Analizando dispositivos..."):
+                query = generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_consentimiento_por_dispositivo(df)
     
     with st.expander("📈 Estimación de Usuarios Reales"):
         if st.button("Ejecutar Estimación", key="btn_estimation"):
@@ -227,7 +278,6 @@ def main():
             if tab_id == "cookies":
                 show_cookies_tab(client, selected_project, selected_dataset, start_date, end_date)
             else:
-                # Placeholder para otras pestañas
                 st.info(f"🔧 Sección en desarrollo. Próximamente: consultas para {tab_id}")
 
 if __name__ == "__main__":
