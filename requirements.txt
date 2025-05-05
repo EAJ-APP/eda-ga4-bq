@@ -8,3 +8,4 @@ streamlit==1.32.2
 # Para las consultas por tabs
 plotly==5.18.0  # Para los gráficos avanzados
 pandas==2.2.1
+matplotlib==3.8.0  # Para estilos en tablas
