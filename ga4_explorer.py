@@ -70,20 +70,20 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     """
 
 def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date):
-    """Consulta corregida con tipos consistentes para CASE"""
+    """Consulta con CAST explícito para garantizar tipos consistentes"""
     return f"""
     SELECT
       device.category AS device_type,
-      -- Analytics Storage (convertimos todo a BOOLEAN primero)
+      -- Analytics Storage
       CASE
         WHEN privacy_info.analytics_storage IS NULL THEN 'null'
-        WHEN privacy_info.analytics_storage = TRUE THEN 'true'  -- Comparación booleana explícita
+        WHEN CAST(privacy_info.analytics_storage AS BOOL) = TRUE THEN 'true'
         ELSE 'false'
       END AS analytics_storage_status,
-      -- Ads Storage (mismo enfoque)
+      -- Ads Storage
       CASE
         WHEN privacy_info.ads_storage IS NULL THEN 'null'
-        WHEN privacy_info.ads_storage = TRUE THEN 'true'  -- Comparación booleana explícita
+        WHEN CAST(privacy_info.ads_storage AS BOOL) = TRUE THEN 'true'
         ELSE 'false'
       END AS ads_storage_status,
       COUNT(*) AS total_events,
