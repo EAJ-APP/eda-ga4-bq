@@ -122,15 +122,21 @@ def main():
         st.header("Consulta básica")
         show_common_interface(client, selected_project, selected_dataset)
 
-def show_common_interface(client, project, dataset):
+# ... (imports y funciones anteriores se mantienen igual)
+
+def show_common_interface(client, project, dataset, tab_id):
     """Muestra la interfaz común en todas las tabs (temporal)"""
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Fecha inicio", value=pd.to_datetime("2023-01-01"), key="start_date_"+st.session_state.get("tab_id",""))
+        start_date = st.date_input("Fecha inicio", 
+                                 value=pd.to_datetime("2023-01-01"), 
+                                 key=f"start_date_{tab_id}")
     with col2:
-        end_date = st.date_input("Fecha fin", value=pd.to_datetime("today"), key="end_date_"+st.session_state.get("tab_id",""))
+        end_date = st.date_input("Fecha fin", 
+                               value=pd.to_datetime("today"), 
+                               key=f"end_date_{tab_id}")
     
-    if st.button("Ejecutar consulta", key="btn_"+st.session_state.get("tab_id","")):
+    if st.button("Ejecutar consulta", key=f"btn_{tab_id}"):
         query = f"""
             SELECT 
                 event_name,
@@ -145,6 +151,28 @@ def show_common_interface(client, project, dataset):
         df = run_query(client, query)
         st.dataframe(df)
         st.bar_chart(df.set_index("event_name"))
+
+def main():
+    # ... (configuración inicial y sidebar se mantiene igual)
+
+    # --- Tabs ---
+    tabs = st.tabs([
+        "🍪 Cookies y Privacidad",
+        "🛒 Ecommerce", 
+        "📈 Adquisición",
+        "🎯 Eventos",
+        "👥 Usuarios",
+        "🕒 Sesiones"
+    ])
+
+    # Asignamos un ID único a cada tab
+    tab_ids = ["cookies", "ecommerce", "acquisition", "events", "users", "sessions"]
+
+    # Contenido para cada tab
+    for tab, tab_id in zip(tabs, tab_ids):
+        with tab:
+            st.header(f"Análisis de {tab_id.capitalize()}")
+            show_common_interface(client, selected_project, selected_dataset, tab_id)
 
 if __name__ == "__main__":
     main()
