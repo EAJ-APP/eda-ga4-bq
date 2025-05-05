@@ -52,7 +52,7 @@ def run_query(client, query, timeout=30):
     except Exception as e:
         handle_bq_error(e, query)
 
-# ===== 5. INTERFAZ PRINCIPAL =====
+# ===== 5. INTERFAZ PRINCIPAL CON TABS =====
 def main():
     check_dependencies()
     st.set_page_config(page_title="GA4 Explorer", layout="wide")
@@ -87,20 +87,55 @@ def main():
     except Exception as e:
         handle_bq_error(e)
 
-    # --- Consulta ---
-    st.header("🔍 Consulta básica")
+    # --- Tabs ---
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🍪 Cookies y Privacidad",
+        "🛒 Ecommerce", 
+        "📈 Adquisición",
+        "🎯 Eventos",
+        "👥 Usuarios",
+        "🕒 Sesiones"
+    ])
+
+    # Contenido idéntico temporal en todas las tabs
+    with tab1:
+        st.header("Consulta básica")
+        show_common_interface(client, selected_project, selected_dataset)
+    
+    with tab2:
+        st.header("Consulta básica")
+        show_common_interface(client, selected_project, selected_dataset)
+    
+    with tab3:
+        st.header("Consulta básica")
+        show_common_interface(client, selected_project, selected_dataset)
+    
+    with tab4:
+        st.header("Consulta básica")
+        show_common_interface(client, selected_project, selected_dataset)
+    
+    with tab5:
+        st.header("Consulta básica")
+        show_common_interface(client, selected_project, selected_dataset)
+    
+    with tab6:
+        st.header("Consulta básica")
+        show_common_interface(client, selected_project, selected_dataset)
+
+def show_common_interface(client, project, dataset):
+    """Muestra la interfaz común en todas las tabs (temporal)"""
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Fecha inicio", value=pd.to_datetime("2023-01-01"))
+        start_date = st.date_input("Fecha inicio", value=pd.to_datetime("2023-01-01"), key="start_date_"+st.session_state.get("tab_id",""))
     with col2:
-        end_date = st.date_input("Fecha fin", value=pd.to_datetime("today"))
+        end_date = st.date_input("Fecha fin", value=pd.to_datetime("today"), key="end_date_"+st.session_state.get("tab_id",""))
     
-    if st.button("Ejecutar consulta"):
+    if st.button("Ejecutar consulta", key="btn_"+st.session_state.get("tab_id","")):
         query = f"""
             SELECT 
                 event_name,
                 COUNT(*) as event_count
-            FROM `{selected_project}.{selected_dataset}.events_*`
+            FROM `{project}.{dataset}.events_*`
             WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' 
                 AND '{end_date.strftime('%Y%m%d')}'
             GROUP BY 1
