@@ -70,18 +70,20 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     """
 
 def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date):
-    """Consulta corregida con CAST explícito para booleanos"""
+    """Consulta optimizada para consentimientos en GA4"""
     return f"""
     SELECT
       device.category AS device_type,
-      CASE 
+      -- Analytics Storage
+      CASE
         WHEN privacy_info.analytics_storage IS NULL THEN 'null'
-        WHEN CAST(privacy_info.analytics_storage AS STRING) = 'true' THEN 'true'
+        WHEN privacy_info.analytics_storage THEN 'true'  -- Direct boolean check
         ELSE 'false'
       END AS analytics_storage_status,
-      CASE 
+      -- Ads Storage
+      CASE
         WHEN privacy_info.ads_storage IS NULL THEN 'null'
-        WHEN CAST(privacy_info.ads_storage AS STRING) = 'true' THEN 'true'
+        WHEN privacy_info.ads_storage THEN 'true'  -- Direct boolean check
         ELSE 'false'
       END AS ads_storage_status,
       COUNT(*) AS total_events,
@@ -159,30 +161,35 @@ def mostrar_consentimiento_basico(df):
         st.plotly_chart(fig2, use_container_width=True)
 
 def mostrar_consentimiento_por_dispositivo(df):
-    """Visualización completa de consentimiento por dispositivo"""
+    """Visualización corregida con datos separados"""
     st.subheader("📱 Consentimiento por Dispositivo (Detallado)")
     
     # Preprocesamiento
     df['device_type'] = df['device_type'].str.capitalize()
-    df['analytics_storage_status'] = df['analytics_storage_status'].map({
-        'true': 'Consentido', 
-        'false': 'No Consentido',
-        'null': 'No Definido'
-    })
-    df['ads_storage_status'] = df['ads_storage_status'].map({
-        'true': 'Consentido', 
-        'false': 'No Consentido',
-        'null': 'No Definido'
-    })
     
-    # Gráficos en tabs
+    # Creamos DataFrames separados
+    df_analytics = df[['device_type', 'analytics_storage_status', 'total_events', 'total_users']]
+    df_ads = df[['device_type', 'ads_storage_status', 'total_events', 'total_users']]
+    
+    # Renombramos columnas para uniformidad
+    df_analytics = df_analytics.rename(columns={'analytics_storage_status': 'consent_status'})
+    df_ads = df_ads.rename(columns={'ads_storage_status': 'consent_status'})
+    
+    # Mapeo de valores
+    consent_map = {
+        'true': 'Consentido',
+        'false': 'No Consentido',
+        'null': 'No Definido'
+    }
+    
     tab1, tab2 = st.tabs(["Analytics Storage", "Ads Storage"])
     
     with tab1:
-        fig_analytics = px.bar(df,
+        df_analytics['consent_status'] = df_analytics['consent_status'].map(consent_map)
+        fig_analytics = px.bar(df_analytics,
                              x='device_type',
                              y='total_events',
-                             color='analytics_storage_status',
+                             color='consent_status',
                              barmode='stack',
                              title='Consentimiento Analytics por Dispositivo',
                              labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
@@ -194,10 +201,11 @@ def mostrar_consentimiento_por_dispositivo(df):
         st.plotly_chart(fig_analytics, use_container_width=True)
         
     with tab2:
-        fig_ads = px.bar(df,
+        df_ads['consent_status'] = df_ads['consent_status'].map(consent_map)
+        fig_ads = px.bar(df_ads,
                        x='device_type',
                        y='total_events',
-                       color='ads_storage_status',
+                       color='consent_status',
                        barmode='stack',
                        title='Consentimiento Ads por Dispositivo',
                        labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
@@ -208,12 +216,10 @@ def mostrar_consentimiento_por_dispositivo(df):
                        })
         st.plotly_chart(fig_ads, use_container_width=True)
     
-    # Tabla resumen completa
+    # Tabla resumen
     st.subheader("📊 Datos Completos")
-    st.dataframe(
-        df.sort_values(['device_type', 'total_events'], ascending=[True, False])
-    )
-
+    st.dataframe(df)
+    
 def mostrar_estimacion_usuarios(df):
     """Visualización para estimación de usuarios"""
     st.subheader("📊 Estimación de Usuarios Reales")
