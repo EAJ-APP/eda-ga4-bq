@@ -70,18 +70,18 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     """
 
 def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date):
-    """Consulta de consentimiento desglosada por dispositivo con todos los estados"""
+    """Consulta corregida con CAST explícito para booleanos"""
     return f"""
     SELECT
       device.category AS device_type,
       CASE 
         WHEN privacy_info.analytics_storage IS NULL THEN 'null'
-        WHEN privacy_info.analytics_storage = True THEN 'true'
+        WHEN CAST(privacy_info.analytics_storage AS STRING) = 'true' THEN 'true'
         ELSE 'false'
       END AS analytics_storage_status,
       CASE 
         WHEN privacy_info.ads_storage IS NULL THEN 'null'
-        WHEN privacy_info.ads_storage = True THEN 'true'
+        WHEN CAST(privacy_info.ads_storage AS STRING) = 'true' THEN 'true'
         ELSE 'false'
       END AS ads_storage_status,
       COUNT(*) AS total_events,
