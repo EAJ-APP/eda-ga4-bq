@@ -14,7 +14,7 @@ def check_dependencies():
         st.error(f"❌ Error: {str(e)}. Actualiza requirements.txt")
         st.stop()
 
-# ===== 2. MANEJO DE ERRORES SIMPLIFICADO =====
+# ===== 2. MANEJO DE ERRORES =====
 def handle_bq_error(e, query=None):
     """Muestra errores de BigQuery de forma legible"""
     error_msg = f"""
@@ -52,7 +52,35 @@ def run_query(client, query, timeout=30):
     except Exception as e:
         handle_bq_error(e, query)
 
-# ===== 5. INTERFAZ PRINCIPAL CON TABS =====
+# ===== 5. INTERFAZ POR TABS =====
+def show_tab_interface(client, project, dataset, tab_id):
+    """Interfaz común para todas las tabs"""
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Fecha inicio", 
+                                 value=pd.to_datetime("2023-01-01"), 
+                                 key=f"start_date_{tab_id}")
+    with col2:
+        end_date = st.date_input("Fecha fin", 
+                               value=pd.to_datetime("today"), 
+                               key=f"end_date_{tab_id}")
+    
+    if st.button("Ejecutar consulta", key=f"btn_{tab_id}"):
+        query = f"""
+            SELECT 
+                event_name,
+                COUNT(*) as event_count
+            FROM `{project}.{dataset}.events_*`
+            WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' 
+                AND '{end_date.strftime('%Y%m%d')}'
+            GROUP BY 1
+            ORDER BY 2 DESC
+            LIMIT 20
+        """
+        df = run_query(client, query)
+        st.dataframe(df)
+        st.bar_chart(df.set_index("event_name"))
+
 def main():
     check_dependencies()
     st.set_page_config(page_title="GA4 Explorer", layout="wide")
@@ -88,91 +116,22 @@ def main():
         handle_bq_error(e)
 
     # --- Tabs ---
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab_titles = [
         "🍪 Cookies y Privacidad",
         "🛒 Ecommerce", 
         "📈 Adquisición",
         "🎯 Eventos",
         "👥 Usuarios",
         "🕒 Sesiones"
-    ])
-
-    # Contenido idéntico temporal en todas las tabs
-    with tab1:
-        st.header("Consulta básica")
-        show_common_interface(client, selected_project, selected_dataset)
-    
-    with tab2:
-        st.header("Consulta básica")
-        show_common_interface(client, selected_project, selected_dataset)
-    
-    with tab3:
-        st.header("Consulta básica")
-        show_common_interface(client, selected_project, selected_dataset)
-    
-    with tab4:
-        st.header("Consulta básica")
-        show_common_interface(client, selected_project, selected_dataset)
-    
-    with tab5:
-        st.header("Consulta básica")
-        show_common_interface(client, selected_project, selected_dataset)
-    
-    with tab6:
-        st.header("Consulta básica")
-        show_common_interface(client, selected_project, selected_dataset)
-
-# ... (imports y funciones anteriores se mantienen igual)
-
-def show_common_interface(client, project, dataset, tab_id):
-    """Muestra la interfaz común en todas las tabs (temporal)"""
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Fecha inicio", 
-                                 value=pd.to_datetime("2023-01-01"), 
-                                 key=f"start_date_{tab_id}")
-    with col2:
-        end_date = st.date_input("Fecha fin", 
-                               value=pd.to_datetime("today"), 
-                               key=f"end_date_{tab_id}")
-    
-    if st.button("Ejecutar consulta", key=f"btn_{tab_id}"):
-        query = f"""
-            SELECT 
-                event_name,
-                COUNT(*) as event_count
-            FROM `{project}.{dataset}.events_*`
-            WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' 
-                AND '{end_date.strftime('%Y%m%d')}'
-            GROUP BY 1
-            ORDER BY 2 DESC
-            LIMIT 20
-        """
-        df = run_query(client, query)
-        st.dataframe(df)
-        st.bar_chart(df.set_index("event_name"))
-
-def main():
-    # ... (configuración inicial y sidebar se mantiene igual)
-
-    # --- Tabs ---
-    tabs = st.tabs([
-        "🍪 Cookies y Privacidad",
-        "🛒 Ecommerce", 
-        "📈 Adquisición",
-        "🎯 Eventos",
-        "👥 Usuarios",
-        "🕒 Sesiones"
-    ])
-
-    # Asignamos un ID único a cada tab
+    ]
     tab_ids = ["cookies", "ecommerce", "acquisition", "events", "users", "sessions"]
-
-    # Contenido para cada tab
+    
+    tabs = st.tabs(tab_titles)
+    
     for tab, tab_id in zip(tabs, tab_ids):
         with tab:
             st.header(f"Análisis de {tab_id.capitalize()}")
-            show_common_interface(client, selected_project, selected_dataset, tab_id)
+            show_tab_interface(client, selected_project, selected_dataset, tab_id)
 
 if __name__ == "__main__":
     main()
