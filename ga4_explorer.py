@@ -70,20 +70,20 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     """
 
 def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date):
-    """Consulta optimizada para consentimientos en GA4"""
+    """Consulta corregida con tipos consistentes para CASE"""
     return f"""
     SELECT
       device.category AS device_type,
-      -- Analytics Storage
+      -- Analytics Storage (convertimos todo a BOOLEAN primero)
       CASE
         WHEN privacy_info.analytics_storage IS NULL THEN 'null'
-        WHEN privacy_info.analytics_storage THEN 'true'
+        WHEN privacy_info.analytics_storage = TRUE THEN 'true'  -- Comparación booleana explícita
         ELSE 'false'
       END AS analytics_storage_status,
-      -- Ads Storage
+      -- Ads Storage (mismo enfoque)
       CASE
         WHEN privacy_info.ads_storage IS NULL THEN 'null'
-        WHEN privacy_info.ads_storage THEN 'true'
+        WHEN privacy_info.ads_storage = TRUE THEN 'true'  -- Comparación booleana explícita
         ELSE 'false'
       END AS ads_storage_status,
       COUNT(*) AS total_events,
