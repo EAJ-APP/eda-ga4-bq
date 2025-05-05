@@ -77,13 +77,13 @@ def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, e
       -- Analytics Storage
       CASE
         WHEN privacy_info.analytics_storage IS NULL THEN 'null'
-        WHEN privacy_info.analytics_storage THEN 'true'  -- Direct boolean check
+        WHEN privacy_info.analytics_storage THEN 'true'
         ELSE 'false'
       END AS analytics_storage_status,
       -- Ads Storage
       CASE
         WHEN privacy_info.ads_storage IS NULL THEN 'null'
-        WHEN privacy_info.ads_storage THEN 'true'  -- Direct boolean check
+        WHEN privacy_info.ads_storage THEN 'true'
         ELSE 'false'
       END AS ads_storage_status,
       COUNT(*) AS total_events,
@@ -168,12 +168,8 @@ def mostrar_consentimiento_por_dispositivo(df):
     df['device_type'] = df['device_type'].str.capitalize()
     
     # Creamos DataFrames separados
-    df_analytics = df[['device_type', 'analytics_storage_status', 'total_events', 'total_users']]
-    df_ads = df[['device_type', 'ads_storage_status', 'total_events', 'total_users']]
-    
-    # Renombramos columnas para uniformidad
-    df_analytics = df_analytics.rename(columns={'analytics_storage_status': 'consent_status'})
-    df_ads = df_ads.rename(columns={'ads_storage_status': 'consent_status'})
+    df_analytics = df[['device_type', 'analytics_storage_status', 'total_events', 'total_users']].copy()
+    df_ads = df[['device_type', 'ads_storage_status', 'total_events', 'total_users']].copy()
     
     # Mapeo de valores
     consent_map = {
@@ -182,10 +178,12 @@ def mostrar_consentimiento_por_dispositivo(df):
         'null': 'No Definido'
     }
     
+    df_analytics['consent_status'] = df_analytics['analytics_storage_status'].map(consent_map)
+    df_ads['consent_status'] = df_ads['ads_storage_status'].map(consent_map)
+    
     tab1, tab2 = st.tabs(["Analytics Storage", "Ads Storage"])
     
     with tab1:
-        df_analytics['consent_status'] = df_analytics['consent_status'].map(consent_map)
         fig_analytics = px.bar(df_analytics,
                              x='device_type',
                              y='total_events',
@@ -201,7 +199,6 @@ def mostrar_consentimiento_por_dispositivo(df):
         st.plotly_chart(fig_analytics, use_container_width=True)
         
     with tab2:
-        df_ads['consent_status'] = df_ads['consent_status'].map(consent_map)
         fig_ads = px.bar(df_ads,
                        x='device_type',
                        y='total_events',
@@ -219,7 +216,7 @@ def mostrar_consentimiento_por_dispositivo(df):
     # Tabla resumen
     st.subheader("📊 Datos Completos")
     st.dataframe(df)
-    
+
 def mostrar_estimacion_usuarios(df):
     """Visualización para estimación de usuarios"""
     st.subheader("📊 Estimación de Usuarios Reales")
