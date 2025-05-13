@@ -254,26 +254,21 @@ def mostrar_estimacion_usuarios(df):
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
     """Pestaña de Cookies con verificación de datos"""
+    with st.expander("🛡️ Consentimiento Básico", expanded=True):
+        if st.button("Ejecutar Análisis Básico", key="btn_consent_basic"):
+            with st.spinner("Calculando consentimientos..."):
+                query = generar_query_consentimiento_basico(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_consentimiento_basico(df)
+    
     with st.expander("📱 Consentimiento por Dispositivo", expanded=True):
         if st.button("Ejecutar Análisis por Dispositivo", key="btn_consent_device"):
             with st.spinner("Analizando dispositivos..."):
-                # Primero verificamos los datos
-                df_diagnostico = verificar_datos_consentimiento(client, project, dataset, start_date, end_date)
-                st.write("Diagnóstico de datos:", df_diagnostico)
-                
-                # Luego ejecutamos la consulta principal
                 query = generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_consentimiento_por_dispositivo(df)
     
-    with st.expander("📱 Consentimiento por Dispositivo"):
-        if st.button("Ejecutar Análisis por Dispositivo", key="btn_consent_device"):
-            with st.spinner("Analizando dispositivos..."):
-                query = generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date)
-                df = run_query(client, query)
-                mostrar_consentimiento_por_dispositivo(df)
-    
-    with st.expander("📈 Estimación de Usuarios Reales"):
+    with st.expander("📈 Estimación de Usuarios Reales", expanded=True):
         if st.button("Ejecutar Estimación", key="btn_estimation"):
             with st.spinner("Estimando usuarios reales..."):
                 query = generar_query_estimacion_usuarios(project, dataset, start_date, end_date)
