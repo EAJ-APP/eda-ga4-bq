@@ -163,59 +163,81 @@ def mostrar_consentimiento_basico(df):
         st.plotly_chart(fig2, use_container_width=True)
 
 def mostrar_consentimiento_por_dispositivo(df):
-    """Visualización corregida con datos separados"""
+    """Visualización corregida con datos separados para cada tipo de consentimiento"""
     st.subheader("📱 Consentimiento por Dispositivo (Detallado)")
     
     # Preprocesamiento
     df['device_type'] = df['device_type'].str.capitalize()
     
-    # Creamos DataFrames separados
+    # Creamos DataFrames separados y filtrados
     df_analytics = df[['device_type', 'analytics_storage_status', 'total_events', 'total_users']].copy()
     df_ads = df[['device_type', 'ads_storage_status', 'total_events', 'total_users']].copy()
     
-    # Mapeo de valores
+    # Mapeo de valores para consistencia
     consent_map = {
         'true': 'Consentido',
         'false': 'No Consentido',
-        'null': 'No Definido'
+        'null': 'No Definido',
+        'yes': 'Consentido',  # Por si acaso existe este formato
+        'no': 'No Consentido'
     }
     
+    # Aplicamos el mapeo a cada DataFrame por separado
     df_analytics['consent_status'] = df_analytics['analytics_storage_status'].map(consent_map)
     df_ads['consent_status'] = df_ads['ads_storage_status'].map(consent_map)
+    
+    # Calculamos los totales por dispositivo para ordenar los gráficos
+    device_order = df.groupby('device_type')['total_events'].sum().sort_values(ascending=False).index
     
     tab1, tab2 = st.tabs(["Analytics Storage", "Ads Storage"])
     
     with tab1:
-        fig_analytics = px.bar(df_analytics,
-                             x='device_type',
-                             y='total_events',
-                             color='consent_status',
-                             barmode='stack',
-                             title='Consentimiento Analytics por Dispositivo',
-                             labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
-                             color_discrete_map={
-                                 'Consentido': '#4CAF50',
-                                 'No Consentido': '#F44336',
-                                 'No Definido': '#9E9E9E'
-                             })
+        # Gráfico para Analytics Storage
+        fig_analytics = px.bar(
+            df_analytics,
+            x='device_type',
+            y='total_events',
+            color='consent_status',
+            category_orders={"device_type": device_order},
+            barmode='stack',
+            title='Consentimiento Analytics por Dispositivo',
+            labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
+            color_discrete_map={
+                'Consentido': '#4CAF50',
+                'No Consentido': '#F44336',
+                'No Definido': '#9E9E9E'
+            }
+        )
         st.plotly_chart(fig_analytics, use_container_width=True)
         
-    with tab2:
-        fig_ads = px.bar(df_ads,
-                       x='device_type',
-                       y='total_events',
-                       color='consent_status',
-                       barmode='stack',
-                       title='Consentimiento Ads por Dispositivo',
-                       labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
-                       color_discrete_map={
-                           'Consentido': '#4CAF50',
-                           'No Consentido': '#F44336',
-                           'No Definido': '#9E9E9E'
-                       })
-        st.plotly_chart(fig_ads, use_container_width=True)
+        # Mostrar datos específicos de Analytics
+        with st.expander("Ver datos de Analytics"):
+            st.dataframe(df_analytics)
     
-    # Tabla resumen
+    with tab2:
+        # Gráfico para Ads Storage
+        fig_ads = px.bar(
+            df_ads,
+            x='device_type',
+            y='total_events',
+            color='consent_status',
+            category_orders={"device_type": device_order},
+            barmode='stack',
+            title='Consentimiento Ads por Dispositivo',
+            labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
+            color_discrete_map={
+                'Consentido': '#4CAF50',
+                'No Consentido': '#F44336',
+                'No Definido': '#9E9E9E'
+            }
+        )
+        st.plotly_chart(fig_ads, use_container_width=True)
+        
+        # Mostrar datos específicos de Ads
+        with st.expander("Ver datos de Ads"):
+            st.dataframe(df_ads)
+    
+    # Tabla resumen completa
     st.subheader("📊 Datos Completos")
     st.dataframe(df)
 
