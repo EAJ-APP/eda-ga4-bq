@@ -70,30 +70,36 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     """
 
 def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date):
-    """Consulta definitiva que maneja todos los formatos de consentimiento"""
+    """Consulta definitiva que garantiza datos diferentes para cada consentimiento"""
     return f"""
+    WITH base_data AS (
+      SELECT
+        device.category AS device_type,
+        privacy_info.analytics_storage AS raw_analytics,
+        privacy_info.ads_storage AS raw_ads,
+        user_pseudo_id,
+        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id') AS session_id
+      FROM `{project}.{dataset}.events_*`
+      WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' AND '{end_date.strftime('%Y%m%d')}'
+    )
     SELECT
-      device.category AS device_type,
-      -- Analytics Storage (maneja strings, booleanos y NULL)
+      device_type,
+      -- Analytics
       CASE
-        WHEN privacy_info.analytics_storage IS NULL THEN 'null'
-        WHEN LOWER(CAST(privacy_info.analytics_storage AS STRING)) = 'true' THEN 'true'
-        WHEN LOWER(CAST(privacy_info.analytics_storage AS STRING)) = 'yes' THEN 'true'
+        WHEN raw_analytics IS NULL THEN 'null'
+        WHEN LOWER(CAST(raw_analytics AS STRING)) IN ('true', 'yes', '1') THEN 'true'
         ELSE 'false'
       END AS analytics_storage_status,
-      -- Ads Storage (mismo enfoque)
+      -- Ads
       CASE
-        WHEN privacy_info.ads_storage IS NULL THEN 'null'
-        WHEN LOWER(CAST(privacy_info.ads_storage AS STRING)) = 'true' THEN 'true'
-        WHEN LOWER(CAST(privacy_info.ads_storage AS STRING)) = 'yes' THEN 'true'
+        WHEN raw_ads IS NULL THEN 'null'
+        WHEN LOWER(CAST(raw_ads AS STRING)) IN ('true', 'yes', '1') THEN 'true'
         ELSE 'false'
       END AS ads_storage_status,
       COUNT(*) AS total_events,
       COUNT(DISTINCT user_pseudo_id) AS total_users,
-      COUNT(DISTINCT CONCAT(user_pseudo_id, '-', 
-        (SELECT value.int_value FROM UNNEST(event_params) WHERE key = 'ga_session_id'))) AS total_sessions
-    FROM `{project}.{dataset}.events_*`
-    WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' AND '{end_date.strftime('%Y%m%d')}'
+      COUNT(DISTINCT CONCAT(user_pseudo_id, '-', session_id)) AS total_sessions
+    FROM base_data
     GROUP BY 1, 2, 3
     ORDER BY device_type, total_events DESC
     """
@@ -163,82 +169,71 @@ def mostrar_consentimiento_basico(df):
         st.plotly_chart(fig2, use_container_width=True)
 
 def mostrar_consentimiento_por_dispositivo(df):
-    """Visualización corregida sin expanders anidados"""
+    """Visualización con verificación de datos diferentes"""
     st.subheader("📱 Consentimiento por Dispositivo (Detallado)")
     
-    # Preprocesamiento
+    # Verificación inicial
+    if df.empty:
+        st.warning("No hay datos disponibles para el rango seleccionado")
+        return
+    
+    # Verificar si los datos son diferentes
+    analytics_values = df['analytics_storage_status'].unique()
+    ads_values = df['ads_storage_status'].unique()
+    
+    if set(analytics_values) == set(ads_values) and \
+       all(df['analytics_storage_status'] == df['ads_storage_status']):
+        st.error("⚠️ Advertencia: Los datos de Analytics y Ads son idénticos")
+        st.write("Esto podría indicar que:")
+        st.write("- La implementación de consentimiento es la misma para ambos")
+        st.write("- Hay un problema con la recolección de datos")
+        st.write("Datos completos recibidos:")
+        st.dataframe(df)
+        return
+    
+    # Preprocesamiento normal
     df['device_type'] = df['device_type'].str.capitalize()
-    
-    # Creamos DataFrames separados
-    df_analytics = df[['device_type', 'analytics_storage_status', 'total_events', 'total_users']].copy()
-    df_ads = df[['device_type', 'ads_storage_status', 'total_events', 'total_users']].copy()
-    
-    # Mapeo de valores
-    consent_map = {
-        'true': 'Consentido',
-        'false': 'No Consentido',
-        'null': 'No Definido',
-        'yes': 'Consentido',
-        'no': 'No Consentido'
-    }
-    
-    df_analytics['consent_status'] = df_analytics['analytics_storage_status'].map(consent_map)
-    df_ads['consent_status'] = df_ads['ads_storage_status'].map(consent_map)
-    
-    # Orden de dispositivos por eventos totales
-    device_order = df.groupby('device_type')['total_events'].sum().sort_values(ascending=False).index
+    consent_map = {'true': 'Consentido', 'false': 'No Consentido', 'null': 'No Definido'}
     
     tab1, tab2 = st.tabs(["Analytics Storage", "Ads Storage"])
     
     with tab1:
-        # Gráfico para Analytics
-        fig_analytics = px.bar(
-            df_analytics,
-            x='device_type',
-            y='total_events',
-            color='consent_status',
-            category_orders={"device_type": device_order},
-            barmode='stack',
-            title='Consentimiento Analytics por Dispositivo',
-            labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
-            color_discrete_map={
-                'Consentido': '#4CAF50',
-                'No Consentido': '#F44336',
-                'No Definido': '#9E9E9E'
-            }
-        )
-        st.plotly_chart(fig_analytics, use_container_width=True)
+        df_analytics = df[['device_type', 'analytics_storage_status', 'total_events']].copy()
+        df_analytics['consent_status'] = df_analytics['analytics_storage_status'].map(consent_map)
         
-        # Mostrar datos de Analytics (sin expander)
-        st.write("Datos de Analytics Storage:")
+        fig = px.bar(df_analytics, x='device_type', y='total_events', 
+                    color='consent_status', barmode='stack',
+                    title='Consentimiento Analytics por Dispositivo',
+                    color_discrete_map={'Consentido': '#4CAF50', 'No Consentido': '#F44336', 'No Definido': '#9E9E9E'})
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.write("Datos Analytics:")
         st.dataframe(df_analytics)
     
     with tab2:
-        # Gráfico para Ads
-        fig_ads = px.bar(
-            df_ads,
-            x='device_type',
-            y='total_events',
-            color='consent_status',
-            category_orders={"device_type": device_order},
-            barmode='stack',
-            title='Consentimiento Ads por Dispositivo',
-            labels={'device_type': 'Dispositivo', 'total_events': 'Eventos'},
-            color_discrete_map={
-                'Consentido': '#4CAF50',
-                'No Consentido': '#F44336',
-                'No Definido': '#9E9E9E'
-            }
-        )
-        st.plotly_chart(fig_ads, use_container_width=True)
+        df_ads = df[['device_type', 'ads_storage_status', 'total_events']].copy()
+        df_ads['consent_status'] = df_ads['ads_storage_status'].map(consent_map)
         
-        # Mostrar datos de Ads (sin expander)
-        st.write("Datos de Ads Storage:")
+        fig = px.bar(df_ads, x='device_type', y='total_events', 
+                    color='consent_status', barmode='stack',
+                    title='Consentimiento Ads por Dispositivo',
+                    color_discrete_map={'Consentido': '#4CAF50', 'No Consentido': '#F44336', 'No Definido': '#9E9E9E'})
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.write("Datos Ads:")
         st.dataframe(df_ads)
     
-    # Tabla resumen completa
-    st.subheader("📊 Datos Completos")
-    st.dataframe(df)
+    # Estadísticas comparativas
+    st.subheader("📊 Comparativa de Consentimientos")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.metric("Eventos con Consentimiento Analytics", 
+                 f"{df[df['analytics_storage_status'] == 'true']['total_events'].sum():,}")
+    
+    with col2:
+        st.metric("Eventos con Consentimiento Ads", 
+                 f"{df[df['ads_storage_status'] == 'true']['total_events'].sum():,}")
 
 def mostrar_estimacion_usuarios(df):
     """Visualización para estimación de usuarios"""
@@ -258,13 +253,18 @@ def mostrar_estimacion_usuarios(df):
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
-    """Pestaña de Cookies con múltiples consultas en acordeones"""
-    with st.expander("🛡️ Consentimiento Básico", expanded=True):
-        if st.button("Ejecutar Análisis Básico", key="btn_consent_basic"):
-            with st.spinner("Calculando consentimientos..."):
-                query = generar_query_consentimiento_basico(project, dataset, start_date, end_date)
+    """Pestaña de Cookies con verificación de datos"""
+    with st.expander("📱 Consentimiento por Dispositivo", expanded=True):
+        if st.button("Ejecutar Análisis por Dispositivo", key="btn_consent_device"):
+            with st.spinner("Analizando dispositivos..."):
+                # Primero verificamos los datos
+                df_diagnostico = verificar_datos_consentimiento(client, project, dataset, start_date, end_date)
+                st.write("Diagnóstico de datos:", df_diagnostico)
+                
+                # Luego ejecutamos la consulta principal
+                query = generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date)
                 df = run_query(client, query)
-                mostrar_consentimiento_basico(df)
+                mostrar_consentimiento_por_dispositivo(df)
     
     with st.expander("📱 Consentimiento por Dispositivo"):
         if st.button("Ejecutar Análisis por Dispositivo", key="btn_consent_device"):
