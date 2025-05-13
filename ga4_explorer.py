@@ -163,36 +163,35 @@ def mostrar_consentimiento_basico(df):
         st.plotly_chart(fig2, use_container_width=True)
 
 def mostrar_consentimiento_por_dispositivo(df):
-    """Visualización corregida con datos separados para cada tipo de consentimiento"""
+    """Visualización corregida sin expanders anidados"""
     st.subheader("📱 Consentimiento por Dispositivo (Detallado)")
     
     # Preprocesamiento
     df['device_type'] = df['device_type'].str.capitalize()
     
-    # Creamos DataFrames separados y filtrados
+    # Creamos DataFrames separados
     df_analytics = df[['device_type', 'analytics_storage_status', 'total_events', 'total_users']].copy()
     df_ads = df[['device_type', 'ads_storage_status', 'total_events', 'total_users']].copy()
     
-    # Mapeo de valores para consistencia
+    # Mapeo de valores
     consent_map = {
         'true': 'Consentido',
         'false': 'No Consentido',
         'null': 'No Definido',
-        'yes': 'Consentido',  # Por si acaso existe este formato
+        'yes': 'Consentido',
         'no': 'No Consentido'
     }
     
-    # Aplicamos el mapeo a cada DataFrame por separado
     df_analytics['consent_status'] = df_analytics['analytics_storage_status'].map(consent_map)
     df_ads['consent_status'] = df_ads['ads_storage_status'].map(consent_map)
     
-    # Calculamos los totales por dispositivo para ordenar los gráficos
+    # Orden de dispositivos por eventos totales
     device_order = df.groupby('device_type')['total_events'].sum().sort_values(ascending=False).index
     
     tab1, tab2 = st.tabs(["Analytics Storage", "Ads Storage"])
     
     with tab1:
-        # Gráfico para Analytics Storage
+        # Gráfico para Analytics
         fig_analytics = px.bar(
             df_analytics,
             x='device_type',
@@ -210,12 +209,12 @@ def mostrar_consentimiento_por_dispositivo(df):
         )
         st.plotly_chart(fig_analytics, use_container_width=True)
         
-        # Mostrar datos específicos de Analytics
-        with st.expander("Ver datos de Analytics"):
-            st.dataframe(df_analytics)
+        # Mostrar datos de Analytics (sin expander)
+        st.write("Datos de Analytics Storage:")
+        st.dataframe(df_analytics)
     
     with tab2:
-        # Gráfico para Ads Storage
+        # Gráfico para Ads
         fig_ads = px.bar(
             df_ads,
             x='device_type',
@@ -233,9 +232,9 @@ def mostrar_consentimiento_por_dispositivo(df):
         )
         st.plotly_chart(fig_ads, use_container_width=True)
         
-        # Mostrar datos específicos de Ads
-        with st.expander("Ver datos de Ads"):
-            st.dataframe(df_ads)
+        # Mostrar datos de Ads (sin expander)
+        st.write("Datos de Ads Storage:")
+        st.dataframe(df_ads)
     
     # Tabla resumen completa
     st.subheader("📊 Datos Completos")
