@@ -156,9 +156,33 @@ def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
 
 # ===== 6. VISUALIZACIONES =====
 def mostrar_consentimiento_basico(df):
-    """Visualización para consulta básica de consentimiento"""
+    """Visualización para consulta básica de consentimiento con porcentajes"""
     st.subheader("📋 Datos Crudos")
-    st.dataframe(df)
+    
+    # Calcular totales para porcentajes
+    total_eventos = df['total_events'].sum()
+    total_usuarios = df['total_users'].sum()
+    total_sesiones = df['total_sessions'].sum()
+    
+    # Crear copia del DataFrame para no modificar el original
+    df_mostrar = df.copy()
+    
+    # Calcular porcentajes
+    df_mostrar['% eventos'] = (df_mostrar['total_events'] / total_eventos * 100).round(2).astype(str) + '%'
+    df_mostrar['% usuarios'] = (df_mostrar['total_users'] / total_usuarios * 100).round(2).astype(str) + '%'
+    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astype(str) + '%'
+    
+    # Reordenar columnas
+    columnas = ['analytics_storage_status', 'ads_storage_status', 
+                'total_events', '% eventos',
+                'total_users', '% usuarios',
+                'total_sessions', '% sesiones']
+    
+    st.dataframe(df_mostrar[columnas].style.format({
+        'total_events': '{:,}',
+        'total_users': '{:,}',
+        'total_sessions': '{:,}'
+    }))
     
     col1, col2 = st.columns(2)
     with col1:
