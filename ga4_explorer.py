@@ -107,50 +107,20 @@ def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, e
     ORDER BY device_type, total_events DESC
     """
 
-def generar_query_estimacion_usuarios(project, dataset, start_date, end_date):
-    """Versión corregida que maneja correctamente los tipos de datos"""
+def generar_query_consentimiento_real(project, dataset, start_date, end_date):
+    """Nueva consulta para porcentaje real de consentimiento"""
     return f"""
-    WITH ConsentFactors AS (
-        SELECT 2.0 AS factor_value, 'true' AS consent_state
-        UNION ALL
-        SELECT 3.0 AS factor_value, 'false' AS consent_state
-    ),
-    EventData AS (
-        SELECT
-            CASE 
-                WHEN privacy_info.analytics_storage IS NULL THEN 'false'
-                ELSE LOWER(CAST(privacy_info.analytics_storage AS STRING))
-            END AS consent_state,
-            COUNT(1) AS total_events,
-            COUNT(DISTINCT user_pseudo_id) AS distinct_users
-        FROM `{project}.{dataset}.events_*`
-        WHERE event_name = 'page_view'
-          AND _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' AND '{end_date.strftime('%Y%m%d')}'
-        GROUP BY consent_state
-    ),
-    ConsentAnalysis AS (
-        SELECT
-            CASE 
-                WHEN ed.consent_state = 'true' THEN 'Granted'
-                ELSE 'Denied'
-            END AS consent_state,
-            ed.total_events,
-            ed.distinct_users,
-            CAST(ROUND(ed.total_events / cf.factor_value) AS INT64) AS estimated_users
-        FROM EventData ed
-        LEFT JOIN ConsentFactors cf ON 
-            CASE 
-                WHEN ed.consent_state = 'true' THEN 'true'
-                ELSE 'false'
-            END = cf.consent_state
-    )
     SELECT
-        consent_state,
-        total_events,
-        distinct_users,
-        estimated_users,
-        ROUND(SAFE_DIVIDE(total_events, SUM(total_events) OVER()), 4) AS event_share
-    FROM ConsentAnalysis
+        CASE
+            WHEN privacy_info.analytics_storage IS NULL THEN 'No Definido'
+            WHEN LOWER(CAST(privacy_info.analytics_storage AS STRING)) IN ('false', 'no', '0') THEN 'Denegado'
+            ELSE 'Aceptado'
+        END AS consent_status,
+        COUNT(*) AS total_events,
+        ROUND(COUNT(*) / SUM(COUNT(*)) OVER() * 100, 2) AS event_percentage
+    FROM `{project}.{dataset}.events_*`
+    WHERE _TABLE_SUFFIX BETWEEN '{start_date.strftime('%Y%m%d')}' AND '{end_date.strftime('%Y%m%d')}'
+    GROUP BY 1
     ORDER BY total_events DESC
     """
 
@@ -279,22 +249,36 @@ def mostrar_consentimiento_por_dispositivo(df):
     with col2:
         ads_true = df[df['ads_status'] == 'true']['total_events'].sum()
         st.metric("Eventos con Consentimiento Ads", f"{ads_true:,}")
-      
-def mostrar_estimacion_usuarios(df):
-    """Visualización para estimación de usuarios"""
-    st.subheader("📊 Estimación de Usuarios Reales")
-    df['consent_state'] = df['consent_state'].map({
-        'Granted': 'Consentimiento Otorgado',
-        'Denied': 'Consentimiento Denegado'
-    })
+
+def mostrar_consentimiento_real(df):
+    """Nueva visualización para porcentaje real de consentimiento"""
+    st.subheader("🔍 Porcentaje Real de Consentimiento (Todos los Eventos)")
     
-    fig = px.bar(df, x='consent_state', y=['distinct_users', 'estimated_users'],
-                barmode='group', title='Comparativa: Usuarios Detectados vs Estimados',
-                labels={'value': 'Número de Usuarios', 'variable': 'Tipo'})
+    # Mapeo de estados a colores
+    status_colors = {
+        'Aceptado': '#4CAF50',
+        'Denegado': '#F44336',
+        'No Definido': '#FFC107'
+    }
+    
+    # Gráfico de torta
+    fig = px.pie(df, 
+                 names='consent_status', 
+                 values='total_events',
+                 color='consent_status',
+                 color_discrete_map=status_colors,
+                 title='Distribución Real del Consentimiento')
     st.plotly_chart(fig, use_container_width=True)
     
-    denied_share = df[df['consent_state'] == 'Consentimiento Denegado']['event_share'].values[0]*100
-    st.metric("📈 Porcentaje de Eventos sin Consentimiento", f"{denied_share:.2f}%")
+    # Mostrar tabla con datos crudos
+    st.dataframe(df.style.format({
+        'total_events': '{:,}',
+        'event_percentage': '{:.2f}%'
+    }))
+    
+    # Calcular y mostrar el % de eventos SIN consentimiento (Denegado + No Definido)
+    denied_pct = df[df['consent_status'].isin(['Denegado', 'No Definido'])]['event_percentage'].sum()
+    st.metric("📉 Eventos sin consentimiento (Real)", f"{denied_pct:.2f}%")
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
@@ -313,12 +297,12 @@ def show_cookies_tab(client, project, dataset, start_date, end_date):
                 df = run_query(client, query)
                 mostrar_consentimiento_por_dispositivo(df)
     
-    with st.expander("📈 Estimación de Usuarios Reales", expanded=True):
-        if st.button("Ejecutar Estimación", key="btn_estimation"):
-            with st.spinner("Estimando usuarios reales..."):
-                query = generar_query_estimacion_usuarios(project, dataset, start_date, end_date)
+    with st.expander("🔍 Porcentaje Real de Consentimiento", expanded=True):
+        if st.button("Calcular Consentimiento Real", key="btn_consent_real"):
+            with st.spinner("Analizando todos los eventos..."):
+                query = generar_query_consentimiento_real(project, dataset, start_date, end_date)
                 df = run_query(client, query)
-                mostrar_estimacion_usuarios(df)
+                mostrar_consentimiento_real(df)
 
 def main():
     check_dependencies()
