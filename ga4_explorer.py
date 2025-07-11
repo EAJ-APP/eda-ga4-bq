@@ -75,7 +75,7 @@ def generar_query_consentimiento_basico(project, dataset, start_date, end_date):
     """
 
 def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, end_date):
-    """Consulta optimizada que muestra correctamente las combinaciones de consentimiento"""
+    """Consulta optimizada que garantiza datos diferentes"""
     return f"""
     WITH base_data AS (
       SELECT
@@ -97,8 +97,8 @@ def generar_query_consentimiento_por_dispositivo(project, dataset, start_date, e
     )
     SELECT
       device_type,
-      analytics_status AS analytics_storage_status,
-      ads_status AS ads_storage_status,
+      analytics_status,
+      ads_status,
       COUNT(*) AS total_events,
       COUNT(DISTINCT user_pseudo_id) AS total_users,
       COUNT(DISTINCT CONCAT(user_pseudo_id, '-', session_id)) AS total_sessions
@@ -172,7 +172,7 @@ def mostrar_consentimiento_basico(df):
         st.plotly_chart(fig2, use_container_width=True)
 
 def mostrar_consentimiento_por_dispositivo(df):
-    """Visualización corregida que muestra datos verdaderamente diferentes en cada pestaña"""
+    """Visualización corregida que muestra datos diferentes en cada pestaña"""
     st.subheader("📱 Consentimiento por Dispositivo (Detallado)")
     
     if df.empty:
@@ -183,20 +183,17 @@ def mostrar_consentimiento_por_dispositivo(df):
     df['device_type'] = df['device_type'].str.capitalize()
     consent_map = {'true': 'Consentido', 'false': 'No Consentido', 'null': 'No Definido'}
     
-    # Creamos DataFrames completamente separados con filtros adecuados
-    df_analytics = df[['device_type', 'analytics_storage_status', 'total_events']].copy()
-    df_analytics['consent_status'] = df_analytics['analytics_storage_status'].map(consent_map)
-    
-    df_ads = df[['device_type', 'ads_storage_status', 'total_events']].copy()
-    df_ads['consent_status'] = df_ads['ads_storage_status'].map(consent_map)
-    
     # Orden de dispositivos por eventos totales
     device_order = df.groupby('device_type')['total_events'].sum().sort_values(ascending=False).index
     
     tab1, tab2 = st.tabs(["Analytics Storage", "Ads Storage"])
     
     with tab1:
-        # Agrupamos correctamente los datos para Analytics
+        # Filtramos y preparamos datos específicos para Analytics
+        df_analytics = df[['device_type', 'analytics_status', 'total_events']].copy()
+        df_analytics['consent_status'] = df_analytics['analytics_status'].map(consent_map)
+        
+        # Agrupamos para el gráfico
         df_analytics_grouped = df_analytics.groupby(['device_type', 'consent_status'])['total_events'].sum().reset_index()
         
         fig_analytics = px.bar(
@@ -220,7 +217,11 @@ def mostrar_consentimiento_por_dispositivo(df):
         st.dataframe(df_analytics_grouped.pivot(index='device_type', columns='consent_status', values='total_events'))
     
     with tab2:
-        # Agrupamos correctamente los datos para Ads
+        # Filtramos y preparamos datos específicos para Ads
+        df_ads = df[['device_type', 'ads_status', 'total_events']].copy()
+        df_ads['consent_status'] = df_ads['ads_status'].map(consent_map)
+        
+        # Agrupamos para el gráfico
         df_ads_grouped = df_ads.groupby(['device_type', 'consent_status'])['total_events'].sum().reset_index()
         
         fig_ads = px.bar(
@@ -243,16 +244,16 @@ def mostrar_consentimiento_por_dispositivo(df):
         st.write("Datos Ads:")
         st.dataframe(df_ads_grouped.pivot(index='device_type', columns='consent_status', values='total_events'))
     
-    # Estadísticas comparativas (se mantienen igual)
+    # Estadísticas comparativas
     st.subheader("📊 Comparativa de Consentimientos")
     col1, col2 = st.columns(2)
     
     with col1:
-        analytics_true = df[df['analytics_storage_status'] == 'true']['total_events'].sum()
+        analytics_true = df[df['analytics_status'] == 'true']['total_events'].sum()
         st.metric("Eventos con Consentimiento Analytics", f"{analytics_true:,}")
     
     with col2:
-        ads_true = df[df['ads_storage_status'] == 'true']['total_events'].sum()
+        ads_true = df[df['ads_status'] == 'true']['total_events'].sum()
         st.metric("Eventos con Consentimiento Ads", f"{ads_true:,}")
       
 def mostrar_estimacion_usuarios(df):
