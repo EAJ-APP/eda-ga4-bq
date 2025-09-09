@@ -301,12 +301,32 @@ def mostrar_consentimiento_real(df):
     st.metric("📉 Eventos sin consentimiento (Real)", f"{denied_pct:.2f}%")
 
 def mostrar_comparativa_eventos(df):
-    """Visualización para comparativa completa de eventos"""
-    st.subheader("📊 Comparativa Completa de Eventos de Ecommerce")
+    """Visualización para comparativa completa de eventos (con funnel como antes)"""
+    st.subheader("📊 Funnel de Ecommerce")
     
     if df.empty:
         st.warning("No hay datos disponibles para el rango seleccionado")
         return
+    
+    # Agregar datos por tipo de evento (suma total)
+    event_totals = df.groupby('event_name').agg({
+        'total_events': 'sum',
+        'unique_users': 'sum'
+    }).reset_index()
+    
+    # Crear datos para el funnel
+    funnel_data = {
+        'event_name': ['page_view', 'view_item', 'add_to_cart', 'begin_checkout', 'purchase'],
+        'total_events': [
+            event_totals[event_totals['event_name'] == 'page_view']['total_events'].sum(),
+            event_totals[event_totals['event_name'] == 'view_item']['total_events'].sum(),
+            event_totals[event_totals['event_name'] == 'add_to_cart']['total_events'].sum(),
+            event_totals[event_totals['event_name'] == 'begin_checkout']['total_events'].sum(),
+            event_totals[event_totals['event_name'] == 'purchase']['total_events'].sum()
+        ]
+    }
+    
+    funnel_df = pd.DataFrame(funnel_data)
     
     # Mostrar tabla con datos crudos
     st.dataframe(df.style.format({
@@ -314,7 +334,41 @@ def mostrar_comparativa_eventos(df):
         'unique_users': '{:,}'
     }))
     
-    # Pivotear datos para gráficos
+    # Calcular tasas de conversión
+    page_views = funnel_df[funnel_df['event_name'] == 'page_view']['total_events'].values[0]
+    view_items = funnel_df[funnel_df['event_name'] == 'view_item']['total_events'].values[0]
+    add_to_cart = funnel_df[funnel_df['event_name'] == 'add_to_cart']['total_events'].values[0]
+    begin_checkout = funnel_df[funnel_df['event_name'] == 'begin_checkout']['total_events'].values[0]
+    purchases = funnel_df[funnel_df['event_name'] == 'purchase']['total_events'].values[0]
+    
+    # Mostrar métricas de conversión
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        view_item_rate = (view_items / page_views * 100) if page_views > 0 else 0
+        st.metric("Tasa View Item", f"{view_item_rate:.2f}%")
+    with col2:
+        add_to_cart_rate = (add_to_cart / view_items * 100) if view_items > 0 else 0
+        st.metric("Tasa Add to Cart", f"{add_to_cart_rate:.2f}%")
+    with col3:
+        checkout_rate = (begin_checkout / view_items * 100) if view_items > 0 else 0
+        st.metric("Tasa Checkout", f"{checkout_rate:.2f}%")
+    with col4:
+        purchase_rate = (purchases / view_items * 100) if view_items > 0 else 0
+        st.metric("Tasa Compra", f"{purchase_rate:.2f}%")
+    
+    # Gráfico de funnel
+    fig_funnel = go.Figure(go.Funnel(
+        y=["Page Views", "View Item", "Add to Cart", "Begin Checkout", "Purchase"],
+        x=[page_views, view_items, add_to_cart, begin_checkout, purchases],
+        textinfo="value+percent initial",
+        opacity=0.8,
+        marker={"color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]}
+    ))
+    
+    fig_funnel.update_layout(title="Funnel de Conversión de Ecommerce")
+    st.plotly_chart(fig_funnel, use_container_width=True)
+    
+    # Gráfico de tendencia de conversiones
     df_pivot = df.pivot_table(
         index='event_date', 
         columns='event_name', 
@@ -322,55 +376,31 @@ def mostrar_comparativa_eventos(df):
         aggfunc='sum'
     ).fillna(0).reset_index()
     
-    # Gráfico de líneas - Evolución temporal
-    fig_line = px.line(
-        df_pivot, 
-        x='event_date', 
-        y=df_pivot.columns[1:],  # Todas las columnas excepto event_date
-        title='Evolución de Eventos por Día',
-        labels={'value': 'Número de Eventos', 'variable': 'Tipo de Evento'}
+    fig_trend = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # Añadir conversiones (barras)
+    fig_trend.add_trace(
+        go.Bar(x=df_pivot['event_date'], y=df_pivot['purchase'], name="Compras", opacity=0.7),
+        secondary_y=False,
     )
-    st.plotly_chart(fig_line, use_container_width=True)
     
-    # Gráfico de barras apiladas
-    fig_bar = px.bar(
-        df_pivot,
-        x='event_date',
-        y=df_pivot.columns[1:],
-        title='Distribución de Eventos por Día',
-        labels={'value': 'Número de Eventos', 'variable': 'Tipo de Evento'},
-        barmode='stack'
+    # Calcular tasa de compra diaria
+    df_pivot['purchase_rate_daily'] = (df_pivot['purchase'] / df_pivot['view_item'] * 100).fillna(0)
+    
+    # Añadir tasas de conversión (líneas)
+    fig_trend.add_trace(
+        go.Scatter(x=df_pivot['event_date'], y=df_pivot['purchase_rate_daily'], 
+                  name="Tasa de Compra", line=dict(color='firebrick', width=3)),
+        secondary_y=True,
     )
-    st.plotly_chart(fig_bar, use_container_width=True)
     
-    # Calcular métricas resumen
-    st.subheader("📈 Métricas Resumen")
+    # Configurar ejes
+    fig_trend.update_xaxes(title_text="Fecha")
+    fig_trend.update_yaxes(title_text="Compras", secondary_y=False)
+    fig_trend.update_yaxes(title_text="Tasa de Compra (%)", secondary_y=True)
+    fig_trend.update_layout(title="Tendencia de Compras y Tasa de Conversión")
     
-    # Totales por tipo de evento
-    summary_df = df.groupby('event_name').agg({
-        'total_events': 'sum',
-        'unique_users': 'sum'
-    }).reset_index()
-    
-    summary_df['avg_events_per_user'] = summary_df['total_events'] / summary_df['unique_users']
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Total Page Views", f"{summary_df[summary_df['event_name'] == 'page_view']['total_events'].values[0]:,}")
-    with col2:
-        st.metric("Total Purchases", f"{summary_df[summary_df['event_name'] == 'purchase']['total_events'].values[0]:,}")
-    with col3:
-        conversion_rate = (summary_df[summary_df['event_name'] == 'purchase']['total_events'].values[0] / 
-                          summary_df[summary_df['event_name'] == 'page_view']['total_events'].values[0] * 100)
-        st.metric("Tasa de Conversión", f"{conversion_rate:.2f}%")
-    
-    # Mostrar tabla resumen
-    st.dataframe(summary_df.style.format({
-        'total_events': '{:,}',
-        'unique_users': '{:,}',
-        'avg_events_per_user': '{:.2f}'
-    }))
+    st.plotly_chart(fig_trend, use_container_width=True)
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
@@ -398,9 +428,9 @@ def show_cookies_tab(client, project, dataset, start_date, end_date):
 
 def show_ecommerce_tab(client, project, dataset, start_date, end_date):
     """Pestaña de Ecommerce con análisis de eventos"""
-    with st.expander("📊 Comparativa de Eventos de Ecommerce", expanded=True):
-        if st.button("Ejecutar Análisis de Eventos", key="btn_eventos"):
-            with st.spinner("Analizando eventos de ecommerce..."):
+    with st.expander("📊 Funnel de Conversión", expanded=True):
+        if st.button("Ejecutar Análisis de Ecommerce", key="btn_ecommerce"):
+            with st.spinner("Analizando funnel de conversión..."):
                 query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_comparativa_eventos(df)
