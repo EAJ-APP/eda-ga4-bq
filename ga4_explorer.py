@@ -4,7 +4,6 @@ from google.oauth2 import service_account
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from concurrent.futures import TimeoutError
 import warnings
 
@@ -368,11 +367,18 @@ def mostrar_comparativa_eventos(df):
     funnel_events = []
     funnel_values = []
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+    event_labels = {
+        'page_view': 'Page Views',
+        'view_item': 'View Item', 
+        'add_to_cart': 'Add to Cart',
+        'begin_checkout': 'Begin Checkout',
+        'purchase': 'Purchase'
+    }
     
     for i, event_type in enumerate(event_types):
         event_value = funnel_df[funnel_df['event_name'] == event_type]['total_events'].values[0]
         if event_value > 0:  # Solo agregar eventos con datos
-            funnel_events.append(event_type.replace('_', ' ').title())
+            funnel_events.append(event_labels[event_type])
             funnel_values.append(event_value)
     
     if funnel_values:  # Solo crear gráfico si hay datos
@@ -386,47 +392,6 @@ def mostrar_comparativa_eventos(df):
         
         fig_funnel.update_layout(title="Funnel de Conversión de Ecommerce")
         st.plotly_chart(fig_funnel, use_container_width=True)
-    
-    # Gráfico de tendencia de conversiones
-    df_pivot = df.pivot_table(
-        index='event_date', 
-        columns='event_name', 
-        values='total_events', 
-        aggfunc='sum'
-    ).fillna(0).reset_index()
-    
-    # Asegurarse de que todas las columnas necesarias existan
-    for event in event_types:
-        if event not in df_pivot.columns:
-            df_pivot[event] = 0
-    
-    # Calcular tasa de compra diaria con manejo de zeros
-    df_pivot['purchase_rate_daily'] = 0
-    if 'view_item' in df_pivot.columns and 'purchase' in df_pivot.columns:
-        df_pivot['purchase_rate_daily'] = (df_pivot['purchase'] / df_pivot['view_item'].replace(0, 1) * 100)
-    
-    fig_trend = make_subplots(specs=[[{"secondary_y": True}]])
-    
-    # Añadir conversiones (barras)
-    fig_trend.add_trace(
-        go.Bar(x=df_pivot['event_date'], y=df_pivot['purchase'], name="Compras", opacity=0.7),
-        secondary_y=False,
-    )
-    
-    # Añadir tasas de conversión (líneas)
-    fig_trend.add_trace(
-        go.Scatter(x=df_pivot['event_date'], y=df_pivot['purchase_rate_daily'], 
-                  name="Tasa de Compra", line=dict(color='firebrick', width=3)),
-        secondary_y=True,
-    )
-    
-    # Configurar ejes
-    fig_trend.update_xaxes(title_text="Fecha")
-    fig_trend.update_yaxes(title_text="Compras", secondary_y=False)
-    fig_trend.update_yaxes(title_text="Tasa de Compra (%)", secondary_y=True)
-    fig_trend.update_layout(title="Tendencia de Compras y Tasa de Conversión")
-    
-    st.plotly_chart(fig_trend, use_container_width=True)
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
