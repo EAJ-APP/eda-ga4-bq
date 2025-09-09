@@ -126,92 +126,22 @@ def generar_query_consentimiento_real(project, dataset, start_date, end_date):
     ORDER BY total_events DESC
     """
 
-def generar_query_ecommerce(project, dataset, start_date, end_date):
-    """Consulta para análisis de funnel de ecommerce"""
+def generar_query_comparativa_eventos(project, dataset, start_date, end_date):
+    """Consulta para comparativa completa de eventos de ecommerce"""
     start_date_str = start_date.strftime('%Y%m%d')
     end_date_str = end_date.strftime('%Y%m%d')
     
     return f"""
-    WITH events_data AS (
-      SELECT
-        user_pseudo_id,
-        event_name,
-        PARSE_DATE('%Y%m%d', event_date) AS event_date,
-        TIMESTAMP_MICROS(event_timestamp) AS event_timestamp
-      FROM 
-        `{project}.{dataset}.events_*`
-      WHERE 
-        event_name IN ('page_view', 'view_item', 'add_to_cart', 'begin_checkout', 'purchase')
-        AND _TABLE_SUFFIX BETWEEN '{start_date_str}' AND '{end_date_str}'
-    ),
-
-    event_stages AS (
-      SELECT
-        user_pseudo_id,
-        event_date,
-        event_timestamp,
-        CASE event_name
-          WHEN 'page_view' THEN 'page_view'
-          WHEN 'view_item' THEN 'view_item'
-          WHEN 'add_to_cart' THEN 'add_to_cart'
-          WHEN 'begin_checkout' THEN 'begin_checkout'
-          WHEN 'purchase' THEN 'purchase'
-        END AS event_stage
-      FROM 
-        events_data
-    ),
-
-    aggregated_funnel AS (
-      SELECT
-        pv.event_date,
-        COUNT(DISTINCT pv.user_pseudo_id) AS page_view_count,
-        COUNT(DISTINCT vi.user_pseudo_id) AS view_item_count,
-        COUNT(DISTINCT atc.user_pseudo_id) AS add_to_cart_count,
-        COUNT(DISTINCT bc.user_pseudo_id) AS begin_checkout_count,
-        COUNT(DISTINCT p.user_pseudo_id) AS purchase_count
-      FROM 
-        event_stages pv
-        LEFT JOIN event_stages vi
-          ON pv.user_pseudo_id = vi.user_pseudo_id
-          AND pv.event_date = vi.event_date
-          AND pv.event_timestamp <= vi.event_timestamp
-          AND vi.event_stage = 'view_item'
-        LEFT JOIN event_stages atc
-          ON vi.user_pseudo_id = atc.user_pseudo_id
-          AND vi.event_date = atc.event_date
-          AND vi.event_timestamp <= atc.event_timestamp
-          AND atc.event_stage = 'add_to_cart'
-        LEFT JOIN event_stages bc
-          ON atc.user_pseudo_id = bc.user_pseudo_id
-          AND atc.event_date = bc.event_date
-          AND atc.event_timestamp <= bc.event_timestamp
-          AND bc.event_stage = 'begin_checkout'
-        LEFT JOIN event_stages p
-          ON bc.user_pseudo_id = p.user_pseudo_id
-          AND bc.event_date = p.event_date
-          AND bc.event_timestamp <= p.event_timestamp
-          AND p.event_stage = 'purchase'
-      WHERE 
-        pv.event_stage = 'page_view'
-      GROUP BY 
-        pv.event_date
-    )
-
     SELECT
       event_date,
-      page_view_count AS page_view,
-      view_item_count AS view_item,
-      add_to_cart_count AS add_to_cart,
-      begin_checkout_count AS begin_checkout,
-      purchase_count AS purchase,
-      ROUND(COALESCE(view_item_count / NULLIF(page_view_count, 0), 0) * 100, 2) AS view_item_rate,
-      ROUND(COALESCE(add_to_cart_count / NULLIF(view_item_count, 0), 0) * 100, 2) AS add_to_cart_rate,
-      ROUND(COALESCE(begin_checkout_count / NULLIF(view_item_count, 0), 0) * 100, 2) AS begin_checkout_rate,
-      ROUND(COALESCE(purchase_count / NULLIF(view_item_count, 0), 0) * 100, 2) AS purchase_rate
-    FROM 
-      aggregated_funnel
-    ORDER BY 
-      event_date ASC
+      event_name,
+      COUNT(*) AS total_events,
+      COUNT(DISTINCT user_pseudo_id) AS unique_users
+    FROM `{project}.{dataset}.events_*`
+    WHERE event_name IN ('page_view', 'view_item', 'add_to_cart', 'begin_checkout', 'purchase')
+      AND _TABLE_SUFFIX BETWEEN '{start_date_str}' AND '{end_date_str}'
+    GROUP BY event_date, event_name
+    ORDER BY event_date, total_events DESC
     """
 
 # ===== 6. VISUALIZACIONES =====
@@ -370,9 +300,9 @@ def mostrar_consentimiento_real(df):
     denied_pct = df[df['consent_status'].isin(['Denegado', 'No Definido'])]['event_percentage'].sum()
     st.metric("📉 Eventos sin consentimiento (Real)", f"{denied_pct:.2f}%")
 
-def mostrar_ecommerce(df):
-    """Visualización para análisis de funnel de ecommerce"""
-    st.subheader("📊 Funnel de Ecommerce")
+def mostrar_comparativa_eventos(df):
+    """Visualización para comparativa completa de eventos"""
+    st.subheader("📊 Comparativa Completa de Eventos de Ecommerce")
     
     if df.empty:
         st.warning("No hay datos disponibles para el rango seleccionado")
@@ -380,69 +310,67 @@ def mostrar_ecommerce(df):
     
     # Mostrar tabla con datos crudos
     st.dataframe(df.style.format({
-        'page_view': '{:,}',
-        'view_item': '{:,}',
-        'add_to_cart': '{:,}',
-        'begin_checkout': '{:,}',
-        'purchase': '{:,}',
-        'view_item_rate': '{:.2f}%',
-        'add_to_cart_rate': '{:.2f}%',
-        'begin_checkout_rate': '{:.2f}%',
-        'purchase_rate': '{:.2f}%'
+        'total_events': '{:,}',
+        'unique_users': '{:,}'
     }))
     
-    # Calcular promedios para las tasas de conversión
-    avg_view_item_rate = df['view_item_rate'].mean()
-    avg_add_to_cart_rate = df['add_to_cart_rate'].mean()
-    avg_begin_checkout_rate = df['begin_checkout_rate'].mean()
-    avg_purchase_rate = df['purchase_rate'].mean()
+    # Pivotear datos para gráficos
+    df_pivot = df.pivot_table(
+        index='event_date', 
+        columns='event_name', 
+        values='total_events', 
+        aggfunc='sum'
+    ).fillna(0).reset_index()
     
-    # Mostrar métricas de conversión
-    col1, col2, col3, col4 = st.columns(4)
+    # Gráfico de líneas - Evolución temporal
+    fig_line = px.line(
+        df_pivot, 
+        x='event_date', 
+        y=df_pivot.columns[1:],  # Todas las columnas excepto event_date
+        title='Evolución de Eventos por Día',
+        labels={'value': 'Número de Eventos', 'variable': 'Tipo de Evento'}
+    )
+    st.plotly_chart(fig_line, use_container_width=True)
+    
+    # Gráfico de barras apiladas
+    fig_bar = px.bar(
+        df_pivot,
+        x='event_date',
+        y=df_pivot.columns[1:],
+        title='Distribución de Eventos por Día',
+        labels={'value': 'Número de Eventos', 'variable': 'Tipo de Evento'},
+        barmode='stack'
+    )
+    st.plotly_chart(fig_bar, use_container_width=True)
+    
+    # Calcular métricas resumen
+    st.subheader("📈 Métricas Resumen")
+    
+    # Totales por tipo de evento
+    summary_df = df.groupby('event_name').agg({
+        'total_events': 'sum',
+        'unique_users': 'sum'
+    }).reset_index()
+    
+    summary_df['avg_events_per_user'] = summary_df['total_events'] / summary_df['unique_users']
+    
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        st.metric("Tasa View Item", f"{avg_view_item_rate:.2f}%")
+        st.metric("Total Page Views", f"{summary_df[summary_df['event_name'] == 'page_view']['total_events'].values[0]:,}")
     with col2:
-        st.metric("Tasa Add to Cart", f"{avg_add_to_cart_rate:.2f}%")
+        st.metric("Total Purchases", f"{summary_df[summary_df['event_name'] == 'purchase']['total_events'].values[0]:,}")
     with col3:
-        st.metric("Tasa Checkout", f"{avg_begin_checkout_rate:.2f}%")
-    with col4:
-        st.metric("Tasa Compra", f"{avg_purchase_rate:.2f}%")
+        conversion_rate = (summary_df[summary_df['event_name'] == 'purchase']['total_events'].values[0] / 
+                          summary_df[summary_df['event_name'] == 'page_view']['total_events'].values[0] * 100)
+        st.metric("Tasa de Conversión", f"{conversion_rate:.2f}%")
     
-    # Gráfico de funnel
-    fig_funnel = go.Figure(go.Funnel(
-        y=["Page Views", "View Item", "Add to Cart", "Begin Checkout", "Purchase"],
-        x=[df['page_view'].sum(), df['view_item'].sum(), df['add_to_cart'].sum(), 
-           df['begin_checkout'].sum(), df['purchase'].sum()],
-        textinfo = "value+percent initial",
-        opacity = 0.8,
-        marker = {"color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]}
-    ))
-    
-    fig_funnel.update_layout(title="Funnel de Conversión de Ecommerce")
-    st.plotly_chart(fig_funnel, use_container_width=True)
-    
-    # Gráfico de tendencia de conversiones
-    fig_trend = make_subplots(specs=[[{"secondary_y": True}]])
-    
-    # Añadir conversiones (barras)
-    fig_trend.add_trace(
-        go.Bar(x=df['event_date'], y=df['purchase'], name="Compras", opacity=0.7),
-        secondary_y=False,
-    )
-    
-    # Añadir tasas de conversión (líneas)
-    fig_trend.add_trace(
-        go.Scatter(x=df['event_date'], y=df['purchase_rate'], name="Tasa de Compra", line=dict(color='firebrick', width=3)),
-        secondary_y=True,
-    )
-    
-    # Configurar ejes
-    fig_trend.update_xaxes(title_text="Fecha")
-    fig_trend.update_yaxes(title_text="Compras", secondary_y=False)
-    fig_trend.update_yaxes(title_text="Tasa de Compra (%)", secondary_y=True)
-    fig_trend.update_layout(title="Tendencia de Compras y Tasa de Conversión")
-    
-    st.plotly_chart(fig_trend, use_container_width=True)
+    # Mostrar tabla resumen
+    st.dataframe(summary_df.style.format({
+        'total_events': '{:,}',
+        'unique_users': '{:,}',
+        'avg_events_per_user': '{:.2f}'
+    }))
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
@@ -469,13 +397,13 @@ def show_cookies_tab(client, project, dataset, start_date, end_date):
                 mostrar_consentimiento_real(df)
 
 def show_ecommerce_tab(client, project, dataset, start_date, end_date):
-    """Pestaña de Ecommerce con análisis de funnel"""
-    with st.expander("📊 Funnel de Conversión", expanded=True):
-        if st.button("Ejecutar Análisis de Ecommerce", key="btn_ecommerce"):
-            with st.spinner("Analizando funnel de conversión..."):
-                query = generar_query_ecommerce(project, dataset, start_date, end_date)
+    """Pestaña de Ecommerce con análisis de eventos"""
+    with st.expander("📊 Comparativa de Eventos de Ecommerce", expanded=True):
+        if st.button("Ejecutar Análisis de Eventos", key="btn_eventos"):
+            with st.spinner("Analizando eventos de ecommerce..."):
+                query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
                 df = run_query(client, query)
-                mostrar_ecommerce(df)
+                mostrar_comparativa_eventos(df)
 
 def main():
     check_dependencies()
