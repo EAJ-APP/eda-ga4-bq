@@ -183,7 +183,7 @@ def mostrar_consentimiento_basico(df):
     # Calcular porcentajes
     df_mostrar['% eventos'] = (df_mostrar['total_events'] / total_eventos * 100).round(2).astype(str) + '%'
     df_mostrar['% usuarios'] = (df_mostrar['total_users'] / total_usuarios * 100).round(2).astype(str) + '%'
-    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astype(str) + '%'
+    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astize(str) + '%'
     
     # Reordenar columnas
     columnas = ['analytics_storage_status', 'ads_storage_status', 
@@ -390,7 +390,7 @@ def mostrar_comparativa_eventos(df):
     # Gráfico de funnel (solo mostrar eventos con datos)
     funnel_events = []
     funnel_values = []
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", '#d62728', '#9467bd']
     event_labels = {
         'page_view': 'Page Views',
         'view_item': 'View Item', 
@@ -425,6 +425,10 @@ def mostrar_ingresos_transacciones(df):
         st.warning("No hay datos de transacciones para el rango seleccionado")
         return
     
+    # Convertir la fecha a formato legible
+    df['date'] = pd.to_datetime(df['date'], format='%Y%m%d')
+    df['fecha_formateada'] = df['date'].dt.strftime('%d/%m/%Y')
+    
     # Mostrar tabla con datos crudos
     st.dataframe(df.style.format({
         'total_purchase_events': '{:,}',
@@ -452,7 +456,7 @@ def mostrar_ingresos_transacciones(df):
     
     # Añadir ingresos (línea, eje izquierdo)
     fig.add_trace(go.Scatter(
-        x=df['date'], 
+        x=df['fecha_formateada'], 
         y=df['purchase_revenue'],
         name='Ingresos (€)',
         line=dict(color='#4CAF50', width=3),
@@ -461,7 +465,7 @@ def mostrar_ingresos_transacciones(df):
     
     # Añadir compras (barras, eje derecho) - Usamos total_purchase_events como proxy
     fig.add_trace(go.Bar(
-        x=df['date'],
+        x=df['fecha_formateada'],
         y=df['total_purchase_events'],
         name='Compras',
         marker_color='#2196F3',
@@ -472,7 +476,13 @@ def mostrar_ingresos_transacciones(df):
     # Configurar layout con doble eje Y
     fig.update_layout(
         title='Ingresos vs Compras',
-        xaxis=dict(title='Fecha'),
+        xaxis=dict(
+            title='Fecha',
+            tickangle=45,
+            tickmode='array',
+            tickvals=df['fecha_formateada'],
+            ticktext=df['fecha_formateada']
+        ),
         yaxis=dict(
             title='Ingresos (€)',
             titlefont=dict(color='#4CAF50'),
@@ -487,7 +497,8 @@ def mostrar_ingresos_transacciones(df):
             overlaying='y',
             side='right'
         ),
-        legend=dict(x=0.02, y=0.98)
+        legend=dict(x=0.02, y=0.98),
+        hovermode='x unified'
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -518,23 +529,19 @@ def show_cookies_tab(client, project, dataset, start_date, end_date):
 
 def show_ecommerce_tab(client, project, dataset, start_date, end_date):
     """Pestaña de Ecommerce con análisis de eventos"""
-    tab1, tab2 = st.tabs(["📊 Funnel de Conversión", "💰 Ingresos y Transacciones"])
+    with st.expander("📊 Funnel de Conversión", expanded=True):
+        if st.button("Ejecutar Análisis de Funnel", key="btn_funnel"):
+            with st.spinner("Analizando funnel de conversión..."):
+                query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_comparativa_eventos(df)
     
-    with tab1:
-        with st.expander("Funnel de Conversión", expanded=True):
-            if st.button("Ejecutar Análisis de Funnel", key="btn_funnel"):
-                with st.spinner("Analizando funnel de conversión..."):
-                    query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
-                    df = run_query(client, query)
-                    mostrar_comparativa_eventos(df)
-    
-    with tab2:
-        with st.expander("Ingresos y Transacciones", expanded=True):
-            if st.button("Analizar Ingresos", key="btn_ingresos"):
-                with st.spinner("Calculando ingresos y transacciones..."):
-                    query = generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
-                    df = run_query(client, query)
-                    mostrar_ingresos_transacciones(df)
+    with st.expander("💰 Ingresos y Transacciones", expanded=True):
+        if st.button("Analizar Ingresos y Transacciones", key="btn_ingresos"):
+            with st.spinner("Calculando ingresos y transacciones..."):
+                query = generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_ingresos_transacciones(df)
 
 def main():
     check_dependencies()
