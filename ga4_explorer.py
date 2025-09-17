@@ -143,8 +143,8 @@ def generar_query_comparativa_eventos(project, dataset, start_date, end_date):
     ORDER BY event_date, total_events DESC
     """
 
-def generar_query_revenue_transacciones(project, dataset, start_date, end_date):
-    """Consulta para análisis de revenue y transacciones"""
+def generar_query_ingresos_transacciones(project, dataset, start_date, end_date):
+    """Consulta CORREGIDA para ingresos y transacciones"""
     start_date_str = start_date.strftime('%Y%m%d')
     end_date_str = end_date.strftime('%Y%m%d')
     
@@ -157,6 +157,7 @@ def generar_query_revenue_transacciones(project, dataset, start_date, end_date):
         `{project}.{dataset}.events_*`
     WHERE
         _TABLE_SUFFIX BETWEEN '{start_date_str}' AND '{end_date_str}'
+        AND event_name = 'purchase'
         AND ecommerce.transaction_id IS NOT NULL
     GROUP BY 
         event_date
@@ -180,7 +181,7 @@ def mostrar_consentimiento_basico(df):
     # Calcular porcentajes
     df_mostrar['% eventos'] = (df_mostrar['total_events'] / total_eventos * 100).round(2).astype(str) + '%'
     df_mostrar['% usuarios'] = (df_mostrar['total_users'] / total_usuarios * 100).round(2).astype(str) + '%'
-    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astype(str) + '%'
+    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astize(str) + '%'
     
     # Reordenar columnas
     columnas = ['analytics_storage_status', 'ads_storage_status', 
@@ -414,9 +415,9 @@ def mostrar_comparativa_eventos(df):
         fig_funnel.update_layout(title="Funnel de Conversión de Ecommerce")
         st.plotly_chart(fig_funnel, use_container_width=True)
 
-def mostrar_revenue_transacciones(df):
-    """Visualización para análisis de revenue y transacciones"""
-    st.subheader("💰 Revenue y Transacciones")
+def mostrar_ingresos_transacciones(df):
+    """Visualización CORREGIDA para ingresos y transacciones"""
+    st.subheader("💰 Ingresos y Transacciones")
     
     if df.empty:
         st.warning("No hay datos de transacciones para el rango seleccionado")
@@ -438,47 +439,24 @@ def mostrar_revenue_transacciones(df):
     with col1:
         st.metric("Total Transacciones", f"{total_transactions:,}")
     with col2:
-        st.metric("Revenue Total", f"€{total_revenue:,.2f}")
+        st.metric("Ingresos Totales", f"€{total_revenue:,.2f}")
     with col3:
         st.metric("Ticket Medio", f"€{avg_transaction_value:,.2f}")
     
-    # Gráfico de tendencia de revenue
-    fig_revenue = px.line(
-        df, 
-        x='date', 
-        y='purchase_revenue',
-        title='Tendencia de Revenue por Día',
-        labels={'date': 'Fecha', 'purchase_revenue': 'Revenue (€)'}
-    )
-    fig_revenue.update_traces(line=dict(color='#4CAF50', width=3))
-    st.plotly_chart(fig_revenue, use_container_width=True)
+    # Gráfico combinado (ingresos + transacciones) - SOLO UN GRÁFICO
+    fig = go.Figure()
     
-    # Gráfico de barras para transacciones
-    fig_transactions = px.bar(
-        df,
-        x='date',
-        y='transactions',
-        title='Transacciones por Día',
-        labels={'date': 'Fecha', 'transactions': 'Número de Transacciones'},
-        color='transactions',
-        color_continuous_scale='Blues'
-    )
-    st.plotly_chart(fig_transactions, use_container_width=True)
-    
-    # Gráfico combinado (revenue + transacciones)
-    fig_combined = go.Figure()
-    
-    # Añadir revenue (línea)
-    fig_combined.add_trace(go.Scatter(
+    # Añadir ingresos (línea, eje izquierdo)
+    fig.add_trace(go.Scatter(
         x=df['date'], 
         y=df['purchase_revenue'],
-        name='Revenue',
+        name='Ingresos',
         line=dict(color='#4CAF50', width=3),
         yaxis='y'
     ))
     
-    # Añadir transacciones (barras)
-    fig_combined.add_trace(go.Bar(
+    # Añadir transacciones (barras, eje derecho)
+    fig.add_trace(go.Bar(
         x=df['date'],
         y=df['transactions'],
         name='Transacciones',
@@ -488,13 +466,14 @@ def mostrar_revenue_transacciones(df):
     ))
     
     # Configurar layout con doble eje Y
-    fig_combined.update_layout(
-        title='Revenue vs Transacciones',
+    fig.update_layout(
+        title='Ingresos vs Transacciones',
         xaxis=dict(title='Fecha'),
         yaxis=dict(
-            title='Revenue (€)',
+            title='Ingresos (€)',
             titlefont=dict(color='#4CAF50'),
-            tickfont=dict(color='#4CAF50')
+            tickfont=dict(color='#4CAF50'),
+            side='left'
         ),
         yaxis2=dict(
             title='Transacciones',
@@ -503,10 +482,11 @@ def mostrar_revenue_transacciones(df):
             anchor='x',
             overlaying='y',
             side='right'
-        )
+        ),
+        legend=dict(x=0.02, y=0.98)
     )
     
-    st.plotly_chart(fig_combined, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
@@ -531,26 +511,22 @@ def show_cookies_tab(client, project, dataset, start_date, end_date):
                 query = generar_query_consentimiento_real(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_consentimiento_real(df)
+    
+    with st.expander("💰 Ingresos y Transacciones", expanded=True):
+        if st.button("Analizar Ingresos", key="btn_ingresos"):
+            with st.spinner("Calculando ingresos y transacciones..."):
+                query = generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_ingresos_transacciones(df)
 
 def show_ecommerce_tab(client, project, dataset, start_date, end_date):
     """Pestaña de Ecommerce con análisis de eventos"""
-    tab1, tab2 = st.tabs(["📊 Funnel de Conversión", "💰 Revenue y Transacciones"])
-    
-    with tab1:
-        with st.expander("Funnel de Conversión", expanded=True):
-            if st.button("Ejecutar Análisis de Funnel", key="btn_funnel"):
-                with st.spinner("Analizando funnel de conversión..."):
-                    query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
-                    df = run_query(client, query)
-                    mostrar_comparativa_eventos(df)
-    
-    with tab2:
-        with st.expander("Revenue y Transacciones", expanded=True):
-            if st.button("Ejecutar Análisis de Revenue", key="btn_revenue"):
-                with st.spinner("Analizando revenue y transacciones..."):
-                    query = generar_query_revenue_transacciones(project, dataset, start_date, end_date)
-                    df = run_query(client, query)
-                    mostrar_revenue_transacciones(df)
+    with st.expander("📊 Funnel de Conversión", expanded=True):
+        if st.button("Ejecutar Análisis de Funnel", key="btn_funnel"):
+            with st.spinner("Analizando funnel de conversión..."):
+                query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_comparativa_eventos(df)
 
 def main():
     check_dependencies()
