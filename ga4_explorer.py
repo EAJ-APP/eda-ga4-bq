@@ -151,8 +151,10 @@ def generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
     return f"""
     SELECT
         event_date AS date,
-        COUNT(DISTINCT ecommerce.transaction_id) AS transactions,
-        SUM(ecommerce.purchase_revenue) AS purchase_revenue
+        COUNT(*) AS total_purchase_events,
+        COUNT(DISTINCT ecommerce.transaction_id) AS unique_transactions,
+        SUM(ecommerce.purchase_revenue) AS purchase_revenue,
+        COUNT(DISTINCT user_pseudo_id) AS unique_buyers
     FROM
         `{project}.{dataset}.events_*`
     WHERE
@@ -181,7 +183,7 @@ def mostrar_consentimiento_basico(df):
     # Calcular porcentajes
     df_mostrar['% eventos'] = (df_mostrar['total_events'] / total_eventos * 100).round(2).astype(str) + '%'
     df_mostrar['% usuarios'] = (df_mostrar['total_users'] / total_usuarios * 100).round(2).astype(str) + '%'
-    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astize(str) + '%'
+    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astype(str) + '%'
     
     # Reordenar columnas
     columnas = ['analytics_storage_status', 'ads_storage_status', 
@@ -425,19 +427,21 @@ def mostrar_ingresos_transacciones(df):
     
     # Mostrar tabla con datos crudos
     st.dataframe(df.style.format({
-        'transactions': '{:,}',
-        'purchase_revenue': '€{:,.2f}'
+        'total_purchase_events': '{:,}',
+        'unique_transactions': '{:,}',
+        'purchase_revenue': '€{:,.2f}',
+        'unique_buyers': '{:,}'
     }))
     
     # Calcular métricas totales
-    total_transactions = df['transactions'].sum()
+    total_purchases = df['total_purchase_events'].sum()
     total_revenue = df['purchase_revenue'].sum()
-    avg_transaction_value = total_revenue / total_transactions if total_transactions > 0 else 0
+    avg_transaction_value = total_revenue / total_purchases if total_purchases > 0 else 0
     
     # Mostrar métricas clave
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Total Transacciones", f"{total_transactions:,}")
+        st.metric("Total Compras", f"{total_purchases:,}")
     with col2:
         st.metric("Ingresos Totales", f"€{total_revenue:,.2f}")
     with col3:
@@ -450,16 +454,16 @@ def mostrar_ingresos_transacciones(df):
     fig.add_trace(go.Scatter(
         x=df['date'], 
         y=df['purchase_revenue'],
-        name='Ingresos',
+        name='Ingresos (€)',
         line=dict(color='#4CAF50', width=3),
         yaxis='y'
     ))
     
-    # Añadir transacciones (barras, eje derecho)
+    # Añadir compras (barras, eje derecho) - Usamos total_purchase_events como proxy
     fig.add_trace(go.Bar(
         x=df['date'],
-        y=df['transactions'],
-        name='Transacciones',
+        y=df['total_purchase_events'],
+        name='Compras',
         marker_color='#2196F3',
         opacity=0.6,
         yaxis='y2'
@@ -467,7 +471,7 @@ def mostrar_ingresos_transacciones(df):
     
     # Configurar layout con doble eje Y
     fig.update_layout(
-        title='Ingresos vs Transacciones',
+        title='Ingresos vs Compras',
         xaxis=dict(title='Fecha'),
         yaxis=dict(
             title='Ingresos (€)',
@@ -476,7 +480,7 @@ def mostrar_ingresos_transacciones(df):
             side='left'
         ),
         yaxis2=dict(
-            title='Transacciones',
+            title='Compras',
             titlefont=dict(color='#2196F3'),
             tickfont=dict(color='#2196F3'),
             anchor='x',
@@ -511,22 +515,26 @@ def show_cookies_tab(client, project, dataset, start_date, end_date):
                 query = generar_query_consentimiento_real(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_consentimiento_real(df)
-    
-    with st.expander("💰 Ingresos y Transacciones", expanded=True):
-        if st.button("Analizar Ingresos", key="btn_ingresos"):
-            with st.spinner("Calculando ingresos y transacciones..."):
-                query = generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
-                df = run_query(client, query)
-                mostrar_ingresos_transacciones(df)
 
 def show_ecommerce_tab(client, project, dataset, start_date, end_date):
     """Pestaña de Ecommerce con análisis de eventos"""
-    with st.expander("📊 Funnel de Conversión", expanded=True):
-        if st.button("Ejecutar Análisis de Funnel", key="btn_funnel"):
-            with st.spinner("Analizando funnel de conversión..."):
-                query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
-                df = run_query(client, query)
-                mostrar_comparativa_eventos(df)
+    tab1, tab2 = st.tabs(["📊 Funnel de Conversión", "💰 Ingresos y Transacciones"])
+    
+    with tab1:
+        with st.expander("Funnel de Conversión", expanded=True):
+            if st.button("Ejecutar Análisis de Funnel", key="btn_funnel"):
+                with st.spinner("Analizando funnel de conversión..."):
+                    query = generar_query_comparativa_eventos(project, dataset, start_date, end_date)
+                    df = run_query(client, query)
+                    mostrar_comparativa_eventos(df)
+    
+    with tab2:
+        with st.expander("Ingresos y Transacciones", expanded=True):
+            if st.button("Analizar Ingresos", key="btn_ingresos"):
+                with st.spinner("Calculando ingresos y transacciones..."):
+                    query = generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
+                    df = run_query(client, query)
+                    mostrar_ingresos_transacciones(df)
 
 def main():
     check_dependencies()
