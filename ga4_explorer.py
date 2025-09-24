@@ -168,7 +168,7 @@ def generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
     """
 
 def generar_query_productos_mas_vendidos(project, dataset, start_date, end_date):
-    """NUEVA CONSULTA: Performance de productos por ingresos"""
+    """NUEVA CONSULTA: Performance de productos por ingresos (CON NOMBRE)"""
     start_date_str = start_date.strftime('%Y%m%d')
     end_date_str = end_date.strftime('%Y%m%d')
     
@@ -177,6 +177,7 @@ def generar_query_productos_mas_vendidos(project, dataset, start_date, end_date)
         -- Extraer datos de items de compras con filtro de fecha
         SELECT
             items.item_id AS item_id,
+            items.item_name AS item_name,
             items.quantity AS item_quantity,
             items.item_revenue AS item_revenue
         FROM
@@ -188,15 +189,45 @@ def generar_query_productos_mas_vendidos(project, dataset, start_date, end_date)
     )
     SELECT
         item_id,
+        item_name,
         SUM(item_quantity) AS total_quantity_sold, -- Cantidad total vendida
         COUNT(*) AS total_purchases, -- Número total de eventos de compra
         SUM(item_revenue) AS total_revenue -- Ingreso total del producto
     FROM 
         PurchaseItems
     GROUP BY 
-        item_id
+        item_id, item_name
     ORDER BY 
         total_revenue DESC -- Ordenar por ingreso total descendente
+    """
+
+def generar_query_relacion_productos(project, dataset, start_date, end_date):
+    """NUEVA CONSULTA: Relación ID vs Nombre de productos"""
+    start_date_str = start_date.strftime('%Y%m%d')
+    end_date_str = end_date.strftime('%Y%m%d')
+    
+    return f"""
+    WITH ProductEvents AS (
+        SELECT DISTINCT
+            items.item_id AS item_id,
+            items.item_name AS item_name
+        FROM
+            `{project}.{dataset}.events_*`,
+            UNNEST(items) AS items
+        WHERE
+            _TABLE_SUFFIX BETWEEN '{start_date_str}' AND '{end_date_str}'
+            AND items.item_id IS NOT NULL
+            AND items.item_name IS NOT NULL
+    )
+    SELECT
+        item_id,
+        item_name,
+        COUNT(*) OVER(PARTITION BY item_name) AS nombres_por_producto,
+        COUNT(*) OVER(PARTITION BY item_id) AS ids_por_nombre
+    FROM 
+        ProductEvents
+    ORDER BY 
+        item_name, item_id
     """
 
 # ===== 6. VISUALIZACIONES =====
@@ -353,7 +384,7 @@ def mostrar_consentimiento_real(df):
     
     # Calcular y mostrar el % de eventos SIN consentimiento (Denegado + No Definido)
     denied_pct = df[df['consent_status'].isin(['Denegado', 'No Definido'])]['event_percentage'].sum()
-    st.metric("📉 Eventos sin consentimiento (Real)", f"{denied_pct:.2f}%")
+    st.metric("📉 Eventos sin consentimiento (Real)", f"{dened_pct:.2f}%")
 
 def mostrar_comparativa_eventos(df):
     """Visualización para comparativa completa de eventos (con funnel como antes)"""
@@ -536,7 +567,7 @@ def mostrar_ingresos_transacciones(df):
     st.plotly_chart(fig, use_container_width=True)
 
 def mostrar_productos_mas_vendidos(df):
-    """NUEVA VISUALIZACIÓN: Performance de productos por ingresos"""
+    """NUEVA VISUALIZACIÓN: Performance de productos por ingresos (CON NOMBRE)"""
     st.subheader("🏆 Productos Más Vendidos por Ingresos")
     
     if df.empty:
@@ -564,19 +595,20 @@ def mostrar_productos_mas_vendidos(df):
     with col3:
         st.metric("Ingreso Promedio por Producto", f"€{avg_revenue_per_product:,.2f}")
     
-    # Gráfico de barras - Top 10 productos por ingresos
+    # Gráfico de barras - Top 10 productos por ingresos (USANDO NOMBRE)
     top_products = df.head(10).copy()
     
     # Crear gráfico de barras horizontal para mejor visualización
     fig_bar = px.bar(
         top_products,
-        y='item_id',
+        y='item_name',
         x='total_revenue',
         orientation='h',
         title='Top 10 Productos por Ingresos',
-        labels={'total_revenue': 'Ingresos (€)', 'item_id': 'ID del Producto'},
+        labels={'total_revenue': 'Ingresos (€)', 'item_name': 'Nombre del Producto'},
         color='total_revenue',
-        color_continuous_scale='Viridis'
+        color_continuous_scale='Viridis',
+        hover_data=['item_id']  # Mostrar ID en hover
     )
     
     fig_bar.update_layout(
@@ -586,14 +618,15 @@ def mostrar_productos_mas_vendidos(df):
     
     st.plotly_chart(fig_bar, use_container_width=True)
     
-    # Gráfico de dispersión: Cantidad vs Ingresos
+    # Gráfico de dispersión: Cantidad vs Ingresos (USANDO NOMBRE)
     fig_scatter = px.scatter(
         df.head(20),  # Limitar a top 20 para mejor visualización
         x='total_quantity_sold',
         y='total_revenue',
         size='total_purchases',
         color='total_revenue',
-        hover_name='item_id',
+        hover_name='item_name',
+        hover_data=['item_id'],
         title='Relación: Cantidad Vendida vs Ingresos',
         labels={
             'total_quantity_sold': 'Cantidad Total Vendida',
@@ -604,65 +637,62 @@ def mostrar_productos_mas_vendidos(df):
     )
     
     st.plotly_chart(fig_scatter, use_container_width=True)
+
+def mostrar_relacion_productos(df):
+    """NUEVA VISUALIZACIÓN: Relación ID vs Nombre de productos"""
+    st.subheader("🔍 Relación ID vs Nombre de Productos")
     
-    # Análisis adicional: Productos estrella vs Long Tail
-    st.subheader("📈 Análisis de Distribución")
+    if df.empty:
+        st.warning("No hay datos de productos para el rango seleccionado")
+        return
     
-    # Calcular concentración de ingresos
-    top_5_revenue = df.head(5)['total_revenue'].sum()
-    top_5_percentage = (top_5_revenue / total_revenue * 100) if total_revenue > 0 else 0
+    # Identificar ineficiencias
+    df_ineficiencias = df[
+        (df['nombres_por_producto'] > 1) | (df['ids_por_nombre'] > 1)
+    ].copy()
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Ingresos Top 5 Productos", f"€{top_5_revenue:,.2f}")
-    with col2:
-        st.metric("% del Total de Ingresos", f"{top_5_percentage:.1f}%")
+    # Aplicar formato condicional para resaltar ineficiencias
+    def highlight_inefficiencies(row):
+        styles = [''] * len(row)
+        if row['nombres_por_producto'] > 1 or row['ids_por_nombre'] > 1:
+            styles = ['background-color: #ffcccc' for _ in row]  # Rojo claro para ineficiencias
+        return styles
     
-    # Gráfico de Pareto (opcional)
-    if len(df) > 1:
-        df_pareto = df.copy()
-        df_pareto['cumulative_percentage'] = (df_pareto['total_revenue'].cumsum() / total_revenue * 100)
+    # Mostrar tabla completa con resaltado
+    st.write("**Tabla completa de relación ID vs Nombre:**")
+    styled_df = df.style.format({
+        'nombres_por_producto': '{:,}',
+        'ids_por_nombre': '{:,}'
+    }).apply(highlight_inefficiencies, axis=1)
+    
+    st.dataframe(styled_df)
+    
+    # Resumen de ineficiencias
+    if not df_ineficiencias.empty:
+        st.warning("🚨 **Se detectaron posibles ineficiencias:**")
         
-        fig_pareto = go.Figure()
+        # Productos con múltiples nombres
+        productos_multi_nombre = df_ineficiencias[df_ineficiencias['nombres_por_producto'] > 1]
+        if not productos_multi_nombre.empty:
+            st.write("**Productos con múltiples nombres:**")
+            for _, row in productos_multi_nombre.head(5).iterrows():
+                st.write(f"- ID `{row['item_id']}` tiene {int(row['nombres_por_producto'])} nombres diferentes")
         
-        # Barras de ingresos
-        fig_pareto.add_trace(go.Bar(
-            x=df_pareto['item_id'].head(15),
-            y=df_pareto['total_revenue'],
-            name='Ingresos por Producto',
-            marker_color='#2196F3'
-        ))
+        # Nombres con múltiples IDs
+        nombres_multi_id = df_ineficiencias[df_ineficiencias['ids_por_nombre'] > 1]
+        if not nombres_multi_id.empty:
+            st.write("**Nombres con múltiples IDs:**")
+            for _, row in nombres_multi_id.head(5).iterrows():
+                st.write(f"- Nombre `{row['item_name']}` tiene {int(row['ids_por_nombre'])} IDs diferentes")
         
-        # Línea de porcentaje acumulado
-        fig_pareto.add_trace(go.Scatter(
-            x=df_pareto['item_id'].head(15),
-            y=df_pareto['cumulative_percentage'],
-            name='% Acumulado',
-            yaxis='y2',
-            line=dict(color='#FF9800', width=3)
-        ))
-        
-        fig_pareto.update_layout(
-            title='Análisis de Pareto: Ingresos por Producto',
-            xaxis_title='Productos',
-            yaxis=dict(
-                title='Ingresos (€)',
-                titlefont=dict(color='#2196F3'),
-                tickfont=dict(color='#2196F3')
-            ),
-            yaxis2=dict(
-                title='% Acumulado',
-                titlefont=dict(color='#FF9800'),
-                tickfont=dict(color='#FF9800'),
-                anchor='x',
-                overlaying='y',
-                side='right',
-                range=[0, 100]
-            ),
-            xaxis_tickangle=-45
-        )
-        
-        st.plotly_chart(fig_pareto, use_container_width=True)
+        # Métricas de ineficiencia
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Productos con ineficiencias", len(df_ineficiencias))
+        with col2:
+            st.metric("% de ineficiencia", f"{(len(df_ineficiencias) / len(df) * 100):.1f}%")
+    else:
+        st.success("✅ No se detectaron ineficiencias en la relación ID vs Nombre")
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
@@ -711,6 +741,14 @@ def show_ecommerce_tab(client, project, dataset, start_date, end_date):
                 query = generar_query_productos_mas_vendidos(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_productos_mas_vendidos(df)
+    
+    # NUEVA SECCIÓN: Relación ID vs Nombre
+    with st.expander("🔍 Relación ID vs Nombre de Productos", expanded=True):
+        if st.button("Analizar Relación Productos", key="btn_relacion"):
+            with st.spinner("Analizando relación ID vs Nombre..."):
+                query = generar_query_relacion_productos(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_relacion_productos(df)
 
 def main():
     check_dependencies()
