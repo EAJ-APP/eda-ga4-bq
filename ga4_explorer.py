@@ -167,6 +167,38 @@ def generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
         event_date
     """
 
+def generar_query_productos_mas_vendidos(project, dataset, start_date, end_date):
+    """NUEVA CONSULTA: Performance de productos por ingresos"""
+    start_date_str = start_date.strftime('%Y%m%d')
+    end_date_str = end_date.strftime('%Y%m%d')
+    
+    return f"""
+    WITH PurchaseItems AS (
+        -- Extraer datos de items de compras con filtro de fecha
+        SELECT
+            items.item_id AS item_id,
+            items.quantity AS item_quantity,
+            items.item_revenue AS item_revenue
+        FROM
+            `{project}.{dataset}.events_*`,
+            UNNEST(items) AS items
+        WHERE
+            event_name = 'purchase' -- Filtrar eventos de compra
+            AND _TABLE_SUFFIX BETWEEN '{start_date_str}' AND '{end_date_str}' -- Filtrado dinámico de fechas
+    )
+    SELECT
+        item_id,
+        SUM(item_quantity) AS total_quantity_sold, -- Cantidad total vendida
+        COUNT(*) AS total_purchases, -- Número total de eventos de compra
+        SUM(item_revenue) AS total_revenue -- Ingreso total del producto
+    FROM 
+        PurchaseItems
+    GROUP BY 
+        item_id
+    ORDER BY 
+        total_revenue DESC -- Ordenar por ingreso total descendente
+    """
+
 # ===== 6. VISUALIZACIONES =====
 def mostrar_consentimiento_basico(df):
     """Visualización para consulta básica de consentimiento con porcentajes"""
@@ -503,6 +535,135 @@ def mostrar_ingresos_transacciones(df):
     
     st.plotly_chart(fig, use_container_width=True)
 
+def mostrar_productos_mas_vendidos(df):
+    """NUEVA VISUALIZACIÓN: Performance de productos por ingresos"""
+    st.subheader("🏆 Productos Más Vendidos por Ingresos")
+    
+    if df.empty:
+        st.warning("No hay datos de productos vendidos para el rango seleccionado")
+        return
+    
+    # Mostrar tabla con datos crudos
+    st.dataframe(df.style.format({
+        'total_quantity_sold': '{:,}',
+        'total_purchases': '{:,}',
+        'total_revenue': '€{:,.2f}'
+    }))
+    
+    # Calcular métricas generales
+    total_revenue = df['total_revenue'].sum()
+    total_quantity = df['total_quantity_sold'].sum()
+    avg_revenue_per_product = df['total_revenue'].mean()
+    
+    # Mostrar métricas clave
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Ingresos Totales Productos", f"€{total_revenue:,.2f}")
+    with col2:
+        st.metric("Cantidad Total Vendida", f"{total_quantity:,}")
+    with col3:
+        st.metric("Ingreso Promedio por Producto", f"€{avg_revenue_per_product:,.2f}")
+    
+    # Gráfico de barras - Top 10 productos por ingresos
+    top_products = df.head(10).copy()
+    
+    # Crear gráfico de barras horizontal para mejor visualización
+    fig_bar = px.bar(
+        top_products,
+        y='item_id',
+        x='total_revenue',
+        orientation='h',
+        title='Top 10 Productos por Ingresos',
+        labels={'total_revenue': 'Ingresos (€)', 'item_id': 'ID del Producto'},
+        color='total_revenue',
+        color_continuous_scale='Viridis'
+    )
+    
+    fig_bar.update_layout(
+        yaxis={'categoryorder': 'total ascending'},
+        height=500
+    )
+    
+    st.plotly_chart(fig_bar, use_container_width=True)
+    
+    # Gráfico de dispersión: Cantidad vs Ingresos
+    fig_scatter = px.scatter(
+        df.head(20),  # Limitar a top 20 para mejor visualización
+        x='total_quantity_sold',
+        y='total_revenue',
+        size='total_purchases',
+        color='total_revenue',
+        hover_name='item_id',
+        title='Relación: Cantidad Vendida vs Ingresos',
+        labels={
+            'total_quantity_sold': 'Cantidad Total Vendida',
+            'total_revenue': 'Ingresos Totales (€)',
+            'total_purchases': 'Número de Compras'
+        },
+        size_max=30
+    )
+    
+    st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    # Análisis adicional: Productos estrella vs Long Tail
+    st.subheader("📈 Análisis de Distribución")
+    
+    # Calcular concentración de ingresos
+    top_5_revenue = df.head(5)['total_revenue'].sum()
+    top_5_percentage = (top_5_revenue / total_revenue * 100) if total_revenue > 0 else 0
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Ingresos Top 5 Productos", f"€{top_5_revenue:,.2f}")
+    with col2:
+        st.metric("% del Total de Ingresos", f"{top_5_percentage:.1f}%")
+    
+    # Gráfico de Pareto (opcional)
+    if len(df) > 1:
+        df_pareto = df.copy()
+        df_pareto['cumulative_percentage'] = (df_pareto['total_revenue'].cumsum() / total_revenue * 100)
+        
+        fig_pareto = go.Figure()
+        
+        # Barras de ingresos
+        fig_pareto.add_trace(go.Bar(
+            x=df_pareto['item_id'].head(15),
+            y=df_pareto['total_revenue'],
+            name='Ingresos por Producto',
+            marker_color='#2196F3'
+        ))
+        
+        # Línea de porcentaje acumulado
+        fig_pareto.add_trace(go.Scatter(
+            x=df_pareto['item_id'].head(15),
+            y=df_pareto['cumulative_percentage'],
+            name='% Acumulado',
+            yaxis='y2',
+            line=dict(color='#FF9800', width=3)
+        ))
+        
+        fig_pareto.update_layout(
+            title='Análisis de Pareto: Ingresos por Producto',
+            xaxis_title='Productos',
+            yaxis=dict(
+                title='Ingresos (€)',
+                titlefont=dict(color='#2196F3'),
+                tickfont=dict(color='#2196F3')
+            ),
+            yaxis2=dict(
+                title='% Acumulado',
+                titlefont=dict(color='#FF9800'),
+                tickfont=dict(color='#FF9800'),
+                anchor='x',
+                overlaying='y',
+                side='right',
+                range=[0, 100]
+            ),
+            xaxis_tickangle=-45
+        )
+        
+        st.plotly_chart(fig_pareto, use_container_width=True)
+
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
     """Pestaña de Cookies con consultas separadas"""
@@ -542,6 +703,14 @@ def show_ecommerce_tab(client, project, dataset, start_date, end_date):
                 query = generar_query_ingresos_transacciones(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_ingresos_transacciones(df)
+    
+    # NUEVA SECCIÓN: Productos Más Vendidos
+    with st.expander("🏆 Productos Más Vendidos", expanded=True):
+        if st.button("Analizar Performance de Productos", key="btn_productos"):
+            with st.spinner("Analizando productos más vendidos..."):
+                query = generar_query_productos_mas_vendidos(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_productos_mas_vendidos(df)
 
 def main():
     check_dependencies()
