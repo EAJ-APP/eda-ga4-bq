@@ -183,7 +183,7 @@ def mostrar_consentimiento_basico(df):
     # Calcular porcentajes
     df_mostrar['% eventos'] = (df_mostrar['total_events'] / total_eventos * 100).round(2).astype(str) + '%'
     df_mostrar['% usuarios'] = (df_mostrar['total_users'] / total_usuarios * 100).round(2).astype(str) + '%'
-    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astize(str) + '%'
+    df_mostrar['% sesiones'] = (df_mostrar['total_sessions'] / total_sesiones * 100).round(2).astype(str) + '%'
     
     # Reordenar columnas
     columnas = ['analytics_storage_status', 'ads_storage_status', 
