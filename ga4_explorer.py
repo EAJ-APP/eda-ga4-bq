@@ -230,7 +230,7 @@ def generar_query_relacion_productos(project, dataset, start_date, end_date):
         item_name, item_id
     """
 def generar_query_detalle_transacciones(project, dataset, start_date, end_date):
-    """CONSULTA SIMPLIFICADA: Solo métricas esenciales en euros"""
+    """CONSULTA SIN LÍMITES: Todas las transacciones disponibles"""
     start_date_str = start_date.strftime('%Y%m%d')
     end_date_str = end_date.strftime('%Y%m%d')
     
@@ -254,8 +254,8 @@ def generar_query_detalle_transacciones(project, dataset, start_date, end_date):
     HAVING
         SUM(ecommerce.purchase_revenue) > 0
     ORDER BY
-        revenue_total DESC
-    LIMIT 1000
+        revenue_total DESC  -- Ordenar por ingresos para ver las más importantes primero
+    -- SIN LIMIT: Procesa todas las transacciones
     """
 # ===== 6. VISUALIZACIONES =====
 def mostrar_consentimiento_basico(df):
@@ -722,22 +722,24 @@ def mostrar_relacion_productos(df):
         st.success("✅ No se detectaron ineficiencias en la relación ID vs Nombre")
 
 def mostrar_detalle_transacciones(df):
-    """VISUALIZACIÓN SIMPLIFICADA: Métricas en euros sin shipping/tax/refunds"""
-    st.subheader("🧾 Detalle de Transacciones")
+    """VISUALIZACIÓN OPTIMIZADA: Para manejar miles de transacciones"""
+    st.subheader("🧾 Detalle Completo de Transacciones")
     
     if df.empty:
         st.warning("No hay datos de transacciones para el rango seleccionado")
         return
     
+    # Informar sobre el volumen de datos
+    total_transacciones = len(df)
+    st.success(f"📈 Se encontraron {total_transacciones:,} transacciones en total")
+    
     # Convertir transaction_id a string para mejor visualización
     df['transaction_id'] = df['transaction_id'].astype(str)
     
     # Mostrar métricas generales
-    total_transacciones = len(df)
     total_revenue = df['revenue_total'].sum()
     avg_transaction_value = df['revenue_total'].mean()
     total_items = df['total_items'].sum()
-    avg_items_per_transaction = df['total_items'].mean()
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -749,58 +751,76 @@ def mostrar_detalle_transacciones(df):
     with col4:
         st.metric("Items Totales", f"{total_items:,}")
     
-    # Filtros interactivos
-    st.subheader("🔍 Filtros de Transacciones")
+    # Filtros interactivos para manejar grandes volúmenes
+    st.subheader("🔍 Filtros y Muestreo")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        # Filtro por percentil de ingresos para manejar muchos datos
+        revenue_percentile = st.slider("Mostrar transacciones arriba del percentil de ingresos", 
+                                     min_value=0, 
+                                     max_value=100, 
+                                     value=0,
+                                     help="0 = todas las transacciones, 90 = top 10% por ingresos")
+    
+    with col2:
         min_revenue = st.number_input("Ingreso mínimo (€)", 
                                     min_value=0.0, 
                                     value=0.0,
                                     step=10.0)
-    with col2:
-        min_items = st.number_input("Items mínimos", 
-                                  min_value=0, 
-                                  value=0,
-                                  step=1)
+    
     with col3:
-        top_n = st.slider("Mostrar top N transacciones", 
-                         min_value=10, 
-                         max_value=min(100, len(df)), 
-                         value=min(20, len(df)))
+        # Limitar visualización a un número manejable
+        max_display = st.selectbox("Máximo a mostrar", 
+                                 options=[100, 500, 1000, 5000, 10000, "Todas"],
+                                 index=2)
     
     # Aplicar filtros
-    df_filtrado = df[
-        (df['revenue_total'] >= min_revenue) & 
-        (df['total_items'] >= min_items)
-    ].head(top_n)
+    if revenue_percentile > 0:
+        revenue_threshold = df['revenue_total'].quantile(revenue_percentile / 100)
+        df_filtrado = df[df['revenue_total'] >= revenue_threshold]
+    else:
+        df_filtrado = df.copy()
+    
+    df_filtrado = df_filtrado[df_filtrado['revenue_total'] >= min_revenue]
+    
+    # Limitar visualización si es necesario
+    if max_display != "Todas" and len(df_filtrado) > max_display:
+        st.info(f"📋 Mostrando las {max_display} transacciones más importantes de {len(df_filtrado):,} disponibles")
+        df_display = df_filtrado.head(max_display)
+    else:
+        df_display = df_filtrado
+    
+    # Mostrar estadísticas del subset
+    if len(df_display) < len(df_filtrado):
+        st.write(f"**Subconjunto analizado:** {len(df_display):,} de {len(df_filtrado):,} transacciones "
+                f"({len(df_display)/len(df_filtrado)*100:.1f}%)")
     
     # Mostrar tabla con datos detallados
-    st.dataframe(df_filtrado.style.format({
+    st.dataframe(df_display.style.format({
         'transaction_id': '{}',
         'total_eventos': '{:,}',
         'revenue_total': '€{:,.2f}',
         'total_items': '{:,}',
         'unique_buyers': '{:,}'
-    }))
+    }), height=400)
     
-    # Gráficos de análisis (solo si hay datos filtrados)
-    if not df_filtrado.empty:
+    # Gráficos de análisis (solo si hay datos y no son demasiados)
+    if not df_display.empty and len(df_display) <= 1000:
         tab1, tab2 = st.tabs(["Distribución de Ingresos", "Relación Items vs Ingresos"])
         
         with tab1:
-            # Histograma de ingresos por transacción
-            fig_hist = px.histogram(df_filtrado, 
+            fig_hist = px.histogram(df_display, 
                                    x='revenue_total',
-                                   nbins=20,
+                                   nbins=min(30, len(df_display)//10),
                                    title='Distribución de Ingresos por Transacción',
                                    labels={'revenue_total': 'Ingresos (€)', 'count': 'Número de Transacciones'})
             fig_hist.update_layout(bargap=0.1)
             st.plotly_chart(fig_hist, use_container_width=True)
         
         with tab2:
-            # Scatter plot: Items vs Ingresos
-            fig_scatter = px.scatter(df_filtrado,
+            fig_scatter = px.scatter(df_display,
                                     x='total_items',
                                     y='revenue_total',
                                     size='unique_buyers',
@@ -814,46 +834,46 @@ def mostrar_detalle_transacciones(df):
                                     },
                                     color_continuous_scale='viridis')
             st.plotly_chart(fig_scatter, use_container_width=True)
-        
-        # Análisis de estadísticas
-        st.subheader("📊 Estadísticas Detalladas")
+    elif len(df_display) > 1000:
+        st.info("📊 **Nota:** Los gráficos se desactivan automáticamente cuando hay más de 1000 transacciones para optimizar el rendimiento")
+    
+    # Análisis de estadísticas siempre visible
+    st.subheader("📊 Estadísticas del Conjunto de Datos")
+    
+    if not df_display.empty:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            max_transaction = df_filtrado['revenue_total'].max()
+            max_transaction = df_display['revenue_total'].max()
             st.metric("Transacción Más Alta", f"€{max_transaction:,.2f}")
         
         with col2:
-            min_transaction = df_filtrado['revenue_total'].min()
+            min_transaction = df_display['revenue_total'].min()
             st.metric("Transacción Más Baja", f"€{min_transaction:,.2f}")
         
         with col3:
-            median_transaction = df_filtrado['revenue_total'].median()
+            median_transaction = df_display['revenue_total'].median()
             st.metric("Mediana", f"€{median_transaction:,.2f}")
         
         with col4:
-            avg_items = df_filtrado['total_items'].mean()
-            st.metric("Items por Transacción", f"{avg_items:.1f}")
+            std_transaction = df_display['revenue_total'].std()
+            st.metric("Desviación Estándar", f"€{std_transaction:,.2f}")
         
-        # Top 5 transacciones
-        st.subheader("🏆 Top 5 Transacciones por Ingresos")
-        top5 = df_filtrado.head(5).copy()
-        top5['ingresos_formateados'] = top5['revenue_total'].apply(lambda x: f"€{x:,.2f}")
-        top5['items_formateados'] = top5['total_items'].apply(lambda x: f"{x:,}")
+        # Resumen de percentiles
+        st.write("**Distribución por Percentiles:**")
+        percentiles = df_display['revenue_total'].quantile([0.1, 0.25, 0.5, 0.75, 0.9])
         
-        for idx, row in top5.iterrows():
-            with st.container():
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    st.write(f"**Transacción ID:** {row['transaction_id']}")
-                with col2:
-                    st.metric("Ingresos", row['ingresos_formateados'])
-                with col3:
-                    st.metric("Items", row['items_formateados'])
-                st.divider()
-    
-    else:
-        st.info("💡 Ajusta los filtros para ver más transacciones")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("P10", f"€{percentiles[0.1]:,.2f}")
+        with col2:
+            st.metric("P25", f"€{percentiles[0.25]:,.2f}")
+        with col3:
+            st.metric("P50 (Mediana)", f"€{percentiles[0.5]:,.2f}")
+        with col4:
+            st.metric("P75", f"€{percentiles[0.75]:,.2f}")
+        with col5:
+            st.metric("P90", f"€{percentiles[0.9]:,.2f}")
 
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
