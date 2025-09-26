@@ -229,7 +229,35 @@ def generar_query_relacion_productos(project, dataset, start_date, end_date):
     ORDER BY 
         item_name, item_id
     """
-
+def generar_query_detalle_transacciones(project, dataset, start_date, end_date):
+    """NUEVA CONSULTA: Detalle completo de transacciones con métricas financieras"""
+    start_date_str = start_date.strftime('%Y%m%d')
+    end_date_str = end_date.strftime('%Y%m%d')
+    
+    return f"""
+    SELECT
+        ecommerce.transaction_id AS transaction_id,
+        SUM(ecommerce.total_item_quantity) AS total_item_quantity,
+        SUM(ecommerce.purchase_revenue_in_usd) AS purchase_revenue_usd,
+        SUM(ecommerce.purchase_revenue) AS purchase_revenue,
+        SUM(ecommerce.refund_value_in_usd) AS refund_value_usd,
+        SUM(ecommerce.refund_value) AS refund_value,
+        SUM(ecommerce.shipping_value_in_usd) AS shipping_value_usd,
+        SUM(ecommerce.shipping_value) AS shipping_value,
+        SUM(ecommerce.tax_value_in_usd) AS tax_value_usd,
+        SUM(ecommerce.tax_value) AS tax_value,
+        SUM(ecommerce.unique_items) AS unique_items
+    FROM
+        `{project}.{dataset}.events_*`
+    WHERE
+        event_name = 'purchase'
+        AND _TABLE_SUFFIX BETWEEN '{start_date_str}' AND '{end_date_str}'
+        AND ecommerce.transaction_id IS NOT NULL
+    GROUP BY
+        ecommerce.transaction_id
+    ORDER BY
+        purchase_revenue_usd DESC
+    """
 # ===== 6. VISUALIZACIONES =====
 def mostrar_consentimiento_basico(df):
     """Visualización para consulta básica de consentimiento con porcentajes"""
@@ -694,6 +722,143 @@ def mostrar_relacion_productos(df):
     else:
         st.success("✅ No se detectaron ineficiencias en la relación ID vs Nombre")
 
+def mostrar_detalle_transacciones(df):
+    """NUEVA VISUALIZACIÓN: Análisis detallado de transacciones"""
+    st.subheader("🧾 Detalle Completo de Transacciones")
+    
+    if df.empty:
+        st.warning("No hay datos de transacciones para el rango seleccionado")
+        return
+    
+    # Mostrar métricas generales
+    total_transacciones = len(df)
+    total_revenue_usd = df['purchase_revenue_usd'].sum()
+    avg_transaction_value = df['purchase_revenue_usd'].mean()
+    total_items = df['total_item_quantity'].sum()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Transacciones", f"{total_transacciones:,}")
+    with col2:
+        st.metric("Ingresos Totales (USD)", f"${total_revenue_usd:,.2f}")
+    with col3:
+        st.metric("Ticket Medio", f"${avg_transaction_value:,.2f}")
+    with col4:
+        st.metric("Items Totales Vendidos", f"{total_items:,}")
+    
+    # Filtros interactivos
+    st.subheader("🔍 Filtros de Transacciones")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        min_revenue = st.number_input("Ingreso mínimo (USD)", 
+                                    min_value=0.0, 
+                                    value=0.0,
+                                    step=10.0)
+    with col2:
+        min_items = st.number_input("Items mínimos por transacción", 
+                                  min_value=0, 
+                                  value=0,
+                                  step=1)
+    with col3:
+        top_n = st.slider("Mostrar top N transacciones", 
+                         min_value=10, 
+                         max_value=100, 
+                         value=20)
+    
+    # Aplicar filtros
+    df_filtrado = df[
+        (df['purchase_revenue_usd'] >= min_revenue) & 
+        (df['total_item_quantity'] >= min_items)
+    ].head(top_n)
+    
+    # Mostrar tabla con datos detallados
+    st.dataframe(df_filtrado.style.format({
+        'total_item_quantity': '{:,}',
+        'purchase_revenue_usd': '${:,.2f}',
+        'purchase_revenue': '${:,.2f}',
+        'refund_value_usd': '${:,.2f}',
+        'refund_value': '${:,.2f}',
+        'shipping_value_usd': '${:,.2f}',
+        'shipping_value': '${:,.2f}',
+        'tax_value_usd': '${:,.2f}',
+        'tax_value': '${:,.2f}',
+        'unique_items': '{:,}'
+    }))
+    
+    # Gráficos de análisis
+    tab1, tab2, tab3 = st.tabs(["Distribución de Ingresos", "Composición de Costos", "Relación Items vs Ingresos"])
+    
+    with tab1:
+        # Histograma de ingresos por transacción
+        fig_hist = px.histogram(df_filtrado, 
+                               x='purchase_revenue_usd',
+                               nbins=20,
+                               title='Distribución de Ingresos por Transacción',
+                               labels={'purchase_revenue_usd': 'Ingresos (USD)', 'count': 'Número de Transacciones'})
+        fig_hist.update_layout(bargap=0.1)
+        st.plotly_chart(fig_hist, use_container_width=True)
+    
+    with tab2:
+        # Gráfico de composición de costos (para transacciones con datos)
+        if not df_filtrado.empty:
+            # Calcular promedios
+            avg_revenue = df_filtrado['purchase_revenue_usd'].mean()
+            avg_shipping = df_filtrado['shipping_value_usd'].mean()
+            avg_tax = df_filtrado['tax_value_usd'].mean()
+            avg_refund = df_filtrado['refund_value_usd'].mean()
+            
+            cost_data = {
+                'Concepto': ['Ingresos Netos', 'Envío', 'Impuestos', 'Reembolsos'],
+                'Monto': [avg_revenue, avg_shipping, avg_tax, avg_refund]
+            }
+            cost_df = pd.DataFrame(cost_data)
+            
+            fig_pie = px.pie(cost_df, 
+                            values='Monto', 
+                            names='Concepto',
+                            title='Composición Promedio de Transacciones (USD)')
+            st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with tab3:
+        # Scatter plot: Items vs Ingresos
+        fig_scatter = px.scatter(df_filtrado,
+                                x='total_item_quantity',
+                                y='purchase_revenue_usd',
+                                size='unique_items',
+                                color='shipping_value_usd',
+                                hover_name='transaction_id',
+                                title='Relación: Cantidad de Items vs Ingresos',
+                                labels={
+                                    'total_item_quantity': 'Cantidad Total de Items',
+                                    'purchase_revenue_usd': 'Ingresos (USD)',
+                                    'unique_items': 'Items Únicos',
+                                    'shipping_value_usd': 'Costo Envío (USD)'
+                                })
+        st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    # Análisis de outliers y estadísticas
+    st.subheader("📊 Estadísticas Detalladas")
+    
+    if not df_filtrado.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            max_transaction = df_filtrado['purchase_revenue_usd'].max()
+            st.metric("Transacción Más Alta", f"${max_transaction:,.2f}")
+        
+        with col2:
+            min_transaction = df_filtrado['purchase_revenue_usd'].min()
+            st.metric("Transacción Más Baja", f"${min_transaction:,.2f}")
+        
+        with col3:
+            median_transaction = df_filtrado['purchase_revenue_usd'].median()
+            st.metric("Mediana de Transacciones", f"${median_transaction:,.2f}")
+        
+        with col4:
+            refund_total = df_filtrado['refund_value_usd'].sum()
+            st.metric("Total Reembolsos", f"${refund_total:,.2f}")
+
 # ===== 7. INTERFAZ PRINCIPAL =====
 def show_cookies_tab(client, project, dataset, start_date, end_date):
     """Pestaña de Cookies con consultas separadas"""
@@ -734,7 +899,14 @@ def show_ecommerce_tab(client, project, dataset, start_date, end_date):
                 df = run_query(client, query)
                 mostrar_ingresos_transacciones(df)
     
-    # NUEVA SECCIÓN: Productos Más Vendidos
+    # NUEVA SECCIÓN: Detalle de Transacciones
+    with st.expander("🧾 Detalle Completo de Transacciones", expanded=True):
+        if st.button("Analizar Detalle de Transacciones", key="btn_detalle_transacciones"):
+            with st.spinner("Obteniendo detalle de transacciones..."):
+                query = generar_query_detalle_transacciones(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_detalle_transacciones(df)
+    
     with st.expander("🏆 Productos Más Vendidos", expanded=True):
         if st.button("Analizar Performance de Productos", key="btn_productos"):
             with st.spinner("Analizando productos más vendidos..."):
@@ -742,13 +914,19 @@ def show_ecommerce_tab(client, project, dataset, start_date, end_date):
                 df = run_query(client, query)
                 mostrar_productos_mas_vendidos(df)
     
-    # NUEVA SECCIÓN: Relación ID vs Nombre
     with st.expander("🔍 Relación ID vs Nombre de Productos", expanded=True):
         if st.button("Analizar Relación Productos", key="btn_relacion"):
             with st.spinner("Analizando relación ID vs Nombre..."):
                 query = generar_query_relacion_productos(project, dataset, start_date, end_date)
                 df = run_query(client, query)
                 mostrar_relacion_productos(df)
+    
+    with st.expander("📈 Funnel de Conversión por Producto", expanded=True):
+        if st.button("Analizar Funnel por Producto", key="btn_funnel_producto"):
+            with st.spinner("Analizando funnel por producto..."):
+                query = generar_query_funnel_por_producto(project, dataset, start_date, end_date)
+                df = run_query(client, query)
+                mostrar_funnel_por_producto(df)
 
 def main():
     check_dependencies()
